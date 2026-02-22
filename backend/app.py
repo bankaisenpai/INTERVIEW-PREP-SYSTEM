@@ -201,9 +201,8 @@ elif page == "🎤 Start Interview":
 
 # Load 3D avatar from local Vite dev server
     st.components.v1.iframe(
-    "http://localhost:5173",
-    height=600,
-    scrolling=False
+    "https://interview-prep-system.vercel.app/",
+    height=600
     )
 
     st.markdown("---")
