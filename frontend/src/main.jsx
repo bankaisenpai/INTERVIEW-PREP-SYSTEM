@@ -162,21 +162,6 @@ function App() {
   const [difficulty, setDifficulty] = useState("Intermediate");
   const [isRecording, setIsRecording] = useState(false);
 
-    // Fix iframe resize issue (Streamlit / production)
-  useEffect(() => {
-  const resize = () => {
-    window.dispatchEvent(new Event("resize"));
-  };
-
-  const timeout = setTimeout(resize, 300);
-  window.addEventListener("resize", resize);
-
-  return () => {
-    window.removeEventListener("resize", resize);
-    clearTimeout(timeout);
-  };
-}, []);
-
   const speak = (text) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.9;
@@ -197,11 +182,6 @@ function App() {
     toneMapping: THREE.ACESFilmicToneMapping,
     toneMappingExposure: 1,
     outputColorSpace: THREE.SRGBColorSpace
-  }}
-  onCreated={({ camera, gl }) => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    gl.setSize(window.innerWidth, window.innerHeight);
   }}
 >
   <InterviewScene isTalking={isTalking} />
@@ -246,6 +226,9 @@ function App() {
     </div>
   );
 }
+useGLTF.preload("/character.glb");
+useGLTF.preload("/animations/Sitting.glb");
+useGLTF.preload("/animations/Talking.glb");
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
