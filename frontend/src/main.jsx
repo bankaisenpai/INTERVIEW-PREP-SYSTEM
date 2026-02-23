@@ -231,7 +231,5 @@ useGLTF.preload("/animations/Sitting.glb");
 useGLTF.preload("/animations/Talking.glb");
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
+  <App />
 );
