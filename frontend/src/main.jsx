@@ -7,7 +7,7 @@ import * as THREE from "three";
 // ═══════════════════════════════════════════════════════════
 // AVATAR COMPONENT
 // ═══════════════════════════════════════════════════════════
-function Avatar({ isTalking, position = [0, 0.16, -0.18] }) {
+function Avatar({ isTalking, position = [0, 0.10, -0.0] }) {
   const group = useRef();
   const { scene } = useGLTF("/character.glb");
   const sitting = useGLTF("/animations/Sitting.glb");
@@ -27,7 +27,7 @@ function Avatar({ isTalking, position = [0, 0.16, -0.18] }) {
     scene.scale.set(scale, scale, scale);
     const newBox = new THREE.Box3().setFromObject(scene);
     const newCenter = newBox.getCenter(new THREE.Vector3());
-    scene.position.set(-newCenter.x, -newBox.min.y, -newCenter.z);
+    scene.position.set(-newCenter.x, -newBox.min.y, -newCenter.z - 0.03)
   }, [scene]);
 
   useEffect(() => {
