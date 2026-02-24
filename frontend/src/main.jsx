@@ -20,10 +20,10 @@ function Avatar({ isTalking, position = [0, 0.16, -0.18] }) {
     if (!scene) return;
     const box = new THREE.Box3().setFromObject(scene);
     const size = box.getSize(new THREE.Vector3());
-    const targetHeight = 0.5;
+    const targetHeight = 3;
     let scale = targetHeight / size.y;
     scale = Math.min(scale, 1.3);
-    scale = Math.max(scale, 0.1);
+    scale = Math.max(scale, 0.2);
     scene.scale.set(scale, scale, scale);
     const newBox = new THREE.Box3().setFromObject(scene);
     const newCenter = newBox.getCenter(new THREE.Vector3());
