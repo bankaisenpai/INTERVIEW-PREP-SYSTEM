@@ -5,841 +5,833 @@ import json
 import requests
 import PyPDF2
 import io
+import os
+import random
+import time
+from dotenv import load_dotenv
 
 st.set_page_config(page_title="AI Interview Prep", page_icon="🎤", layout="wide")
 
-# ═══════════════════════════════════════════════════════════
-# GROQ AI CONFIGURATION
-# ═══════════════════════════════════════════════════════════
-GROQ_API_KEY = "YOUR_GROQ_API_KEY_HERE"  # Get from https://console.groq.com
+load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-def ai_evaluate_answer(question, answer, keywords):
-    """Use Groq AI to evaluate interview answers"""
-    
-    if not GROQ_API_KEY or GROQ_API_KEY == "YOUR_GROQ_API_KEY_HERE":
-        return keyword_evaluate(answer, keywords)
+# ═══════════════════════════════════════════════════════════
+# GROQ AI - CONVERSATION MEMORY & ADAPTIVE
+# ═══════════════════════════════════════════════════════════
+def call_groq_api(prompt, temperature=0.7, max_tokens=1500):
+    if not GROQ_API_KEY:
+        return None
     
     try:
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        prompt = f"""You are an expert technical interviewer. Evaluate this interview answer.
-
-Question: {question}
-Expected Keywords: {', '.join(keywords)}
-
-Candidate's Answer: {answer}
-
-Provide your evaluation as JSON with this exact format:
-{{
-    "score": <number 0-100>,
-    "strengths": ["strength 1", "strength 2"],
-    "improvements": ["improvement 1", "improvement 2"],
-    "feedback": "<one sentence overall feedback>"
-}}
-
-Be specific and constructive. Score generously if concepts are correct even if wording differs."""
-
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": "llama3-8b-8192",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 500
+            "temperature": temperature,
+            "max_tokens": max_tokens
         }
-        
-        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=10)
-        
+        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
-            result = response.json()
-            ai_response = result['choices'][0]['message']['content']
-            
-            import re
-            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
-            if json_match:
-                evaluation = json.loads(json_match.group())
-                return evaluation
-            else:
-                return keyword_evaluate(answer, keywords)
-        else:
-            return keyword_evaluate(answer, keywords)
-            
+            return response.json()['choices'][0]['message']['content']
+        return None
     except Exception as e:
-        return keyword_evaluate(answer, keywords)
+        return None
 
-def keyword_evaluate(answer, keywords):
-    """Fallback keyword-based evaluation"""
-    matched = sum(1 for kw in keywords if kw.lower() in answer.lower())
-    score = int((matched / len(keywords)) * 100)
+def generate_personalized_questions(job_role, difficulty, resume_skills, conversation_history, num_questions=5):
+    """Generate questions WITH conversation memory and resume context"""
     
-    feedback_map = {
-        80: "🌟 Excellent! Comprehensive answer.",
-        60: "👍 Good! Covers key concepts.",
-        40: "⚠️ Partial understanding shown.",
-        0: "❌ Needs more detail on core concepts."
+    random_seed = random.randint(1, 1000)
+    
+    # Build conversation context
+    conv_context = ""
+    if conversation_history:
+        conv_context = "Previous conversation:\n"
+        for item in conversation_history[-3:]:  # Last 3 exchanges
+            conv_context += f"Q: {item['q']}\nA: {item['a'][:200]}...\n"
+    
+    # Build resume context
+    resume_context = ""
+    if resume_skills:
+        all_skills = []
+        for cat, skills in resume_skills.items():
+            all_skills.extend(skills)
+        resume_context = f"Candidate has these skills: {', '.join(all_skills[:10])}\n"
+    
+    job_contexts = {
+        "Data Scientist": "ML algorithms, statistics, Python/R, data preprocessing, model evaluation, deployment",
+        "Frontend Developer": "React/Vue/Angular, JavaScript/TypeScript, CSS, performance, accessibility, state management",
+        "Backend Developer": "APIs, databases, architecture, authentication, caching, microservices, Node/Python/Java",
+        "DevOps Engineer": "CI/CD, Docker, Kubernetes, AWS/Azure, monitoring, automation, infrastructure as code",
+        "ML Engineer": "Model deployment, MLOps, production ML, scalability, model serving, Docker/Kubernetes",
+        "Full Stack Developer": "Frontend (React/Vue) + Backend (Node/Python), databases, REST APIs, deployment",
     }
     
-    feedback = next(v for k, v in sorted(feedback_map.items(), reverse=True) if score >= k)
+    context = job_contexts.get(job_role, "technical skills and problem-solving")
+    
+    prompt = f"""You are an expert technical interviewer for a {job_role} position.
+
+{resume_context}
+
+{conv_context}
+
+Generate {num_questions} UNIQUE interview questions:
+
+REQUIREMENTS:
+1. Questions MUST be specific to {job_role}: {context}
+2. Reference previous conversation if available (e.g., "You mentioned X, now tell me about Y")
+3. Target skills from resume AND identify gaps
+4. Mix question types:
+   - Conceptual (explain X)
+   - Practical (how would you solve Y)
+   - Debugging (find the bug in this code)
+   - Tradeoff (why X over Y)
+5. Difficulty: {difficulty}
+
+Seed: {random_seed}
+
+Return ONLY JSON array:
+[
+  {{"question": "...", "category": "...", "keywords": ["...", "...", "...", "...", "..."], "type": "conceptual|practical|debugging|tradeoff"}}
+]
+
+Generate now:"""
+
+    response = call_groq_api(prompt, temperature=0.85, max_tokens=2000)
+    
+    if response:
+        try:
+            import re
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                questions = json.loads(json_match.group())
+                if len(questions) >= num_questions:
+                    return questions[:num_questions]
+        except:
+            pass
+    
+    return get_default_questions(job_role)
+
+def evaluate_with_rubric(question, answer, keywords, question_type="conceptual"):
+    """AI evaluation with detailed scoring rubric"""
+    
+    if not GROQ_API_KEY or not answer or len(answer.strip()) < 10:
+        return keyword_rubric_evaluate(answer, keywords)
+    
+    prompt = f"""You are evaluating a technical interview answer using a detailed rubric.
+
+Question: {question}
+Type: {question_type}
+Expected keywords: {', '.join(keywords)}
+Candidate's Answer: {answer}
+
+Evaluate using this rubric (total 100 points):
+
+SCORING RUBRIC:
+1. Correctness (0-40): Technical accuracy and understanding
+2. Depth (0-25): Detail level, examples, edge cases
+3. Clarity (0-15): Well-organized, easy to follow
+4. Structure (0-10): Logical flow, introduction-body-conclusion
+5. Real-world Application (0-10): Practical examples, production experience
+
+ADDITIONAL FEEDBACK:
+- Identify specific strengths (2-3 points)
+- Identify areas to improve (2-3 points)
+- Provide an IDEAL ANSWER outline (bullet points)
+- Rewrite their answer in professional interview style
+- Overall constructive feedback
+
+Return JSON:
+{{
+  "total_score": <0-100>,
+  "rubric": {{
+    "correctness": <0-40>,
+    "depth": <0-25>,
+    "clarity": <0-15>,
+    "structure": <0-10>,
+    "real_world": <0-10>
+  }},
+  "strengths": ["...", "..."],
+  "improvements": ["...", "..."],
+  "ideal_answer_outline": ["point 1", "point 2", "point 3"],
+  "rewritten_answer": "Professional version of their answer...",
+  "feedback": "Overall feedback sentence",
+  "needs_followup": true|false,
+  "followup_question": "Optional follow-up if answer is shallow"
+}}
+
+Be specific and constructive."""
+
+    response = call_groq_api(prompt, temperature=0.3, max_tokens=1500)
+    
+    if response:
+        try:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+        except:
+            pass
+    
+    return keyword_rubric_evaluate(answer, keywords)
+
+def keyword_rubric_evaluate(answer, keywords):
+    """Fallback rubric scoring"""
+    if not answer or len(keywords) == 0:
+        return {
+            "total_score": 0,
+            "rubric": {"correctness": 0, "depth": 0, "clarity": 0, "structure": 0, "real_world": 0},
+            "strengths": [],
+            "improvements": ["Please provide an answer"],
+            "ideal_answer_outline": ["Address key concepts", "Provide examples", "Discuss tradeoffs"],
+            "rewritten_answer": "",
+            "feedback": "No answer provided",
+            "needs_followup": False
+        }
+    
+    matched = sum(1 for kw in keywords if kw.lower() in answer.lower())
+    base_score = int((matched / len(keywords)) * 100)
+    
+    # Distribute across rubric
+    correctness = int(base_score * 0.4)
+    depth = int(base_score * 0.25)
+    clarity = int(base_score * 0.15)
+    structure = int(base_score * 0.1)
+    real_world = int(base_score * 0.1)
+    
     missing = [k for k in keywords if k.lower() not in answer.lower()]
     
     return {
-        "score": score,
-        "strengths": [f"Mentioned {len(keywords) - len(missing)} key concepts"],
-        "improvements": [f"Could mention: {', '.join(missing[:2])}"] if missing else ["Great coverage!"],
-        "feedback": feedback
+        "total_score": base_score,
+        "rubric": {
+            "correctness": correctness,
+            "depth": depth,
+            "clarity": clarity,
+            "structure": structure,
+            "real_world": real_world
+        },
+        "strengths": [f"Mentioned {len(keywords) - len(missing)}/{len(keywords)} key concepts"] if matched > 0 else [],
+        "improvements": [f"Consider discussing: {', '.join(missing[:3])}"] if missing else ["Comprehensive!"],
+        "ideal_answer_outline": [f"Explain {kw}" for kw in keywords[:3]],
+        "rewritten_answer": f"A strong answer would cover: {', '.join(keywords)}",
+        "feedback": "👍 Good" if base_score >= 60 else "⚠️ Needs more detail",
+        "needs_followup": base_score < 50
     }
 
+def get_default_questions(job_role):
+    """Fallback questions"""
+    defaults = {
+        "Data Scientist": [
+            {"question": "Explain bias-variance tradeoff", "category": "ML Theory", "keywords": ["bias", "variance", "overfitting", "underfitting", "generalization"], "type": "conceptual"},
+            {"question": "How do you handle imbalanced datasets?", "category": "Data", "keywords": ["imbalanced", "SMOTE", "oversampling", "class weights"], "type": "practical"},
+        ],
+        "Frontend Developer": [
+            {"question": "Explain React hooks lifecycle", "category": "React", "keywords": ["hooks", "useState", "useEffect", "lifecycle", "state"], "type": "conceptual"},
+            {"question": "How do you optimize React performance?", "category": "Performance", "keywords": ["memoization", "lazy loading", "code splitting", "optimization"], "type": "practical"},
+        ],
+    }
+    return defaults.get(job_role, defaults["Data Scientist"])
+
+def generate_improvement_plan(scores, job_role):
+    """Generate 7-day improvement plan based on performance"""
+    
+    if not GROQ_API_KEY:
+        return ["Day 1-7: Practice technical concepts and review fundamentals"]
+    
+    prompt = f"""Based on this interview performance for {job_role}, create a 7-day improvement plan.
+
+Scores by category:
+{json.dumps(scores, indent=2)}
+
+Generate a practical 7-day plan:
+Day 1: Focus area + specific resources/practice
+Day 2: ...
+...
+Day 7: ...
+
+Return as JSON array:
+[
+  {{"day": 1, "focus": "topic", "tasks": ["task1", "task2"], "resources": ["resource1"]}},
+  ...
+]"""
+
+    response = call_groq_api(prompt, temperature=0.7, max_tokens=1000)
+    
+    if response:
+        try:
+            import re
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+        except:
+            pass
+    
+    return [{"day": i+1, "focus": f"Practice Day {i+1}", "tasks": ["Review concepts", "Practice problems"], "resources": ["Online resources"]} for i in range(7)]
+
 # ═══════════════════════════════════════════════════════════
-# RESUME PARSING & SCORING
+# REALISTIC INTRO WITH MEMORY
+# ═══════════════════════════════════════════════════════════
+def get_intro_questions(job_role):
+    return [
+        {
+            "question": f"Good morning! Welcome to our {job_role} interview. Could you please introduce yourself and tell me about your background?",
+            "category": "Introduction",
+            "keywords": ["name", "background", "experience"],
+            "is_intro": True
+        },
+        {
+            "question": f"Thank you! What specifically interests you about the {job_role} position, and what relevant experience do you bring?",
+            "category": "Motivation",
+            "keywords": ["interest", "motivation", "experience", "skills"],
+            "is_intro": True
+        },
+        {
+            "question": "That's great! Before we dive into technical questions, could you walk me through a recent project or achievement you're proud of?",
+            "category": "Project",
+            "keywords": ["project", "achievement", "technical", "implementation"],
+            "is_intro": True
+        }
+    ]
+
+# ═══════════════════════════════════════════════════════════
+# ROLES & MODES
+# ═══════════════════════════════════════════════════════════
+IT_JOB_ROLES = [
+    "Data Scientist", "ML Engineer", "AI/ML Researcher",
+    "Data Engineer", "Data Analyst", "Frontend Developer",
+    "Backend Developer", "Full Stack Developer", "DevOps Engineer",
+    "Cloud Engineer (AWS/Azure/GCP)", "Software Engineer",
+    "QA Engineer", "Cybersecurity Analyst", "Database Administrator",
+    "Mobile Developer (iOS/Android)", "UI/UX Designer",
+    "Product Manager (Tech)", "Solutions Architect", "SRE",
+    "Blockchain Developer", "NLP Engineer", "Computer Vision Engineer"
+]
+
+INTERVIEW_MODES = {
+    "Practice Mode": "Hints allowed, ideal answers shown, no time limit",
+    "Strict Interview": "No hints, timed, feedback at end only",
+    "Company Style": "Customize to specific company patterns"
+}
+
+# ═══════════════════════════════════════════════════════════
+# RESUME PARSING
 # ═══════════════════════════════════════════════════════════
 def parse_resume(uploaded_file):
-    """Extract text and skills from PDF resume"""
     try:
         pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text()
-        
         skills = extract_skills(text)
         experience = extract_experience(text)
-        
         return text, skills, experience
     except Exception as e:
-        st.error(f"Error parsing resume: {str(e)}")
-        return "", [], "Unknown"
+        return "", {}, 0
 
 def extract_skills(text):
-    """Find technical skills in resume"""
     skill_keywords = {
-        'Programming': ['python', 'javascript', 'java', 'c++', 'sql', 'r', 'typescript', 'go', 'rust', 'swift'],
-        'ML/AI': ['machine learning', 'deep learning', 'tensorflow', 'pytorch', 'keras', 'scikit-learn', 'nlp', 'computer vision', 'transformers'],
-        'Web': ['react', 'angular', 'vue', 'node.js', 'express', 'django', 'flask', 'html', 'css'],
+        'Programming': ['python', 'javascript', 'java', 'c++', 'sql', 'r', 'typescript', 'go'],
+        'ML/AI': ['machine learning', 'tensorflow', 'pytorch', 'keras', 'nlp', 'computer vision'],
+        'Web': ['react', 'angular', 'vue', 'node.js', 'django', 'flask', 'nextjs'],
         'Cloud': ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform'],
-        'Data': ['pandas', 'numpy', 'sql', 'mongodb', 'postgresql', 'mysql', 'spark', 'hadoop'],
-        'Tools': ['git', 'github', 'jenkins', 'ci/cd', 'linux', 'bash']
+        'Data': ['pandas', 'numpy', 'sql', 'mongodb', 'spark', 'hadoop'],
+        'Tools': ['git', 'jenkins', 'ci/cd', 'linux', 'agile']
     }
     
     found_skills = {}
     text_lower = text.lower()
     
     for category, skills in skill_keywords.items():
-        found = []
-        for skill in skills:
-            if skill in text_lower:
-                found.append(skill.title())
+        found = [skill.title() for skill in skills if skill in text_lower]
         if found:
             found_skills[category] = found
     
     return found_skills
 
 def extract_experience(text):
-    """Estimate years of experience"""
     import re
-    
-    patterns = [
-        r'(\d+)\+?\s*years?\s+(?:of\s+)?experience',
-        r'experience[:\s]+(\d+)\+?\s*years?',
-        r'(\d+)\+?\s*years?\s+(?:working|in)'
-    ]
-    
+    patterns = [r'(\d+)\+?\s*years?\s+(?:of\s+)?experience']
     for pattern in patterns:
         match = re.search(pattern, text.lower())
         if match:
             return int(match.group(1))
-    
     return 0
 
 def calculate_resume_score(skills, experience, job_role):
-    """Calculate resume match score for job role"""
-    
-    role_requirements = {
-        "Data Scientist": {
-            "required_categories": ['Programming', 'ML/AI', 'Data'],
-            "bonus_categories": ['Cloud', 'Tools'],
-            "min_skills": 8,
-            "ideal_experience": 2
-        },
-        "ML Engineer": {
-            "required_categories": ['Programming', 'ML/AI', 'Cloud'],
-            "bonus_categories": ['Data', 'Tools'],
-            "min_skills": 10,
-            "ideal_experience": 3
-        },
-        "Software Engineer": {
-            "required_categories": ['Programming', 'Web'],
-            "bonus_categories": ['Cloud', 'Tools', 'Data'],
-            "min_skills": 6,
-            "ideal_experience": 2
-        }
-    }
-    
-    req = role_requirements.get(job_role, role_requirements["Data Scientist"])
-    
-    score = 0
-    max_score = 100
-    
-    # Category coverage (40 points)
-    required_found = sum(1 for cat in req['required_categories'] if cat in skills)
-    score += (required_found / len(req['required_categories'])) * 40
-    
-    # Total skills count (30 points)
-    total_skills = sum(len(s) for s in skills.values())
-    score += min((total_skills / req['min_skills']) * 30, 30)
-    
-    # Experience (20 points)
-    if experience >= req['ideal_experience']:
-        score += 20
-    else:
-        score += (experience / req['ideal_experience']) * 20
-    
-    # Bonus categories (10 points)
-    bonus_found = sum(1 for cat in req['bonus_categories'] if cat in skills)
-    score += (bonus_found / len(req['bonus_categories'])) * 10
-    
-    return int(score)
+    score = min((sum(len(s) for s in skills.values()) / 8) * 50, 50)
+    score += 30 if experience >= 2 else (experience / 2) * 30
+    score += len(skills) * 4
+    return int(min(score, 100))
 
 # ═══════════════════════════════════════════════════════════
 # SESSION STATE
 # ═══════════════════════════════════════════════════════════
+if 'interview_stage' not in st.session_state:
+    st.session_state.interview_stage = 'not_started'
 if 'question_num' not in st.session_state:
-    st.session_state.question_num = 1
+    st.session_state.question_num = 0
 if 'start_time' not in st.session_state:
     st.session_state.start_time = datetime.now()
+if 'question_start_time' not in st.session_state:
+    st.session_state.question_start_time = None
 if 'answers' not in st.session_state:
     st.session_state.answers = []
 if 'scores' not in st.session_state:
     st.session_state.scores = []
-if 'resume_text' not in st.session_state:
-    st.session_state.resume_text = ""
+if 'rubric_scores' not in st.session_state:
+    st.session_state.rubric_scores = []
 if 'resume_skills' not in st.session_state:
     st.session_state.resume_skills = {}
 if 'resume_experience' not in st.session_state:
     st.session_state.resume_experience = 0
 if 'resume_score' not in st.session_state:
     st.session_state.resume_score = 0
-if 'current_question' not in st.session_state:
-    st.session_state.current_question = ""
+if 'technical_questions' not in st.session_state:
+    st.session_state.technical_questions = []
+if 'intro_questions' not in st.session_state:
+    st.session_state.intro_questions = []
+if 'conversation_history' not in st.session_state:
+    st.session_state.conversation_history = []
+if 'interview_mode' not in st.session_state:
+    st.session_state.interview_mode = "Practice Mode"
+if 'session_history' not in st.session_state:
+    st.session_state.session_history = []
 
 # ═══════════════════════════════════════════════════════════
-# FIXED CSS - HIGH CONTRAST, READABLE TEXT
+# CSS
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-/* Main headers */
-.main-header { 
-    font-size: 3rem; 
-    font-weight: bold; 
-    text-align: center; 
-    color: #1E88E5; 
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-}
-
-.sub-header { 
-    text-align: center; 
-    color: #666; 
-    font-size: 1.2rem; 
-    margin-bottom: 2rem; 
-}
-
-/* Feature boxes - LIGHT BACKGROUND WITH DARK TEXT */
-.feature-box { 
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    padding: 24px; 
-    border-radius: 12px; 
-    margin: 15px 0; 
-    border-left: 5px solid #1E88E5;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-/* FORCE DARK TEXT IN FEATURE BOXES */
-.feature-box h3 { 
-    color: #1a1a1a !important; 
-    font-weight: 700 !important;
-    font-size: 1.3rem !important;
-    margin-bottom: 8px !important;
-}
-
-.feature-box p { 
-    color: #444 !important; 
-    font-weight: 500 !important;
-    font-size: 0.95rem !important;
-    margin: 0 !important;
-}
-
-.feature-box strong {
-    color: #1E88E5 !important;
-}
-
-/* Buttons */
-.stButton>button { 
-    background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
-    color: white !important;
-    font-size: 1.0rem; 
-    border-radius: 8px; 
-    padding: 0.6rem 2rem;
-    font-weight: 600;
-    border: none;
-    box-shadow: 0 4px 6px rgba(30, 136, 229, 0.3);
-    transition: all 0.3s;
-}
-
-.stButton>button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(30, 136, 229, 0.4);
-}
-
-/* Score cards */
-.score-card { 
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 24px; 
-    border-radius: 12px; 
-    color: white; 
-    text-align: center;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-}
-
-.score-card h2 {
-    font-size: 2.5rem !important;
-    margin: 0 !important;
-    font-weight: 700 !important;
-}
-
-.score-card p {
-    font-size: 0.9rem !important;
-    opacity: 0.9;
-    margin-top: 8px !important;
-}
-
-/* Feedback boxes */
-.strength-box { 
-    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-    padding: 12px 16px; 
-    border-radius: 8px; 
-    margin: 8px 0; 
-    border-left: 4px solid #28a745;
-    color: #155724 !important;
-    font-weight: 500;
-}
-
-.improvement-box { 
-    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-    padding: 12px 16px; 
-    border-radius: 8px; 
-    margin: 8px 0; 
-    border-left: 4px solid #ffc107;
-    color: #856404 !important;
-    font-weight: 500;
-}
-
-/* Skill badges */
-.skill-badge { 
-    display: inline-block; 
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white; 
-    padding: 8px 16px; 
-    border-radius: 20px; 
-    margin: 5px; 
-    font-size: 0.9rem;
-    font-weight: 600;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-/* Category badge */
-.category-badge {
-    display: inline-block;
-    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
-    padding: 6px 12px;
-    border-radius: 15px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin-left: 10px;
-}
-
-/* Resume score display */
-.resume-score-box {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    padding: 30px;
-    border-radius: 16px;
-    text-align: center;
-    color: white;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-    margin: 20px 0;
-}
-
-.resume-score-box h1 {
-    font-size: 4rem !important;
-    margin: 0 !important;
-    font-weight: 800 !important;
-}
-
-.resume-score-box p {
-    font-size: 1.2rem !important;
-    opacity: 0.95;
-    margin-top: 10px !important;
-}
-
-/* Skill category boxes */
-.skill-category-box {
-    background: white;
-    border: 2px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 16px;
-    margin: 10px 0;
-}
-
-.skill-category-box h4 {
-    color: #1E88E5 !important;
-    margin-bottom: 10px !important;
-    font-size: 1.1rem !important;
-}
-
-/* Progress bars */
-.progress-bar {
-    background: #e0e0e0;
-    border-radius: 10px;
-    height: 20px;
-    overflow: hidden;
-    margin: 10px 0;
-}
-
-.progress-fill {
-    background: linear-gradient(90deg, #11998e 0%, #38ef7d 100%);
-    height: 100%;
-    border-radius: 10px;
-    transition: width 0.5s ease;
-}
-
-/* Make markdown text readable everywhere */
-.stMarkdown {
-    color: inherit;
-}
-
-/* Text areas */
-.stTextArea textarea {
-    border: 2px solid #e0e0e0 !important;
-    border-radius: 8px !important;
-    font-size: 1rem !important;
-}
-
-.stTextArea textarea:focus {
-    border-color: #1E88E5 !important;
-    box-shadow: 0 0 0 2px rgba(30, 136, 229, 0.2) !important;
-}
+.main-header { font-size: 3rem; font-weight: bold; text-align: center; color: #1E88E5; }
+.feature-box { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 24px; border-radius: 12px; margin: 15px 0; border-left: 5px solid #1E88E5; }
+.feature-box h3 { color: #1a1a1a !important; font-weight: 700 !important; }
+.stButton>button { background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
+    color: white !important; border-radius: 8px; padding: 0.6rem 2rem; font-weight: 600; }
+.score-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 24px; border-radius: 12px; color: white; text-align: center; }
+.rubric-box { background: white; border: 2px solid #e0e0e0; border-radius: 10px;
+    padding: 16px; margin: 10px 0; }
+.ideal-answer { background: #e8f5e9; border-left: 4px solid #4caf50;
+    padding: 16px; border-radius: 8px; margin: 10px 0; }
+.rewritten-answer { background: #e3f2fd; border-left: 4px solid #2196f3;
+    padding: 16px; border-radius: 8px; margin: 10px 0; }
+.timer-warning { background: #fff3cd; color: #856404; padding: 12px;
+    border-radius: 8px; margin: 10px 0; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════
-# QUESTIONS DATABASE (25+ QUESTIONS)
-# ═══════════════════════════════════════════════════════════
-QUESTIONS_DB = {
-    "Data Scientist": {
-        "Beginner": [
-            {"question": "What is the difference between supervised and unsupervised learning?", "category": "ML Fundamentals", "keywords": ["supervised", "labeled", "unsupervised", "clustering", "classification"]},
-            {"question": "Explain overfitting and how to prevent it.", "category": "Model Evaluation", "keywords": ["overfitting", "training", "test", "validation", "regularization", "cross-validation"]},
-            {"question": "What is a confusion matrix and what does it tell us?", "category": "Metrics", "keywords": ["confusion", "matrix", "precision", "recall", "true positive", "false positive"]},
-            {"question": "Explain the difference between precision and recall.", "category": "Metrics", "keywords": ["precision", "recall", "true positive", "false positive", "false negative"]},
-            {"question": "What is cross-validation and why is it important?", "category": "Validation", "keywords": ["cross-validation", "k-fold", "training", "validation", "generalization"]},
-            {"question": "Describe the difference between bagging and boosting.", "category": "Ensemble Methods", "keywords": ["bagging", "boosting", "ensemble", "weak learners", "random forest"]},
-            {"question": "What is feature scaling and why is it important?", "category": "Preprocessing", "keywords": ["scaling", "normalization", "standardization", "feature", "range"]},
-        ],
-        "Intermediate": [
-            {"question": "Explain the bias-variance tradeoff.", "category": "ML Theory", "keywords": ["bias", "variance", "tradeoff", "underfitting", "overfitting", "generalization"]},
-            {"question": "How do you handle imbalanced datasets?", "category": "Data Preprocessing", "keywords": ["imbalanced", "sampling", "SMOTE", "class weights", "oversampling", "undersampling"]},
-            {"question": "What is gradient descent and its variants?", "category": "Optimization", "keywords": ["gradient", "descent", "learning rate", "SGD", "Adam", "momentum"]},
-            {"question": "Explain feature engineering and its importance.", "category": "Feature Engineering", "keywords": ["feature", "engineering", "transformation", "selection", "scaling"]},
-            {"question": "What are ensemble methods in machine learning?", "category": "Algorithms", "keywords": ["ensemble", "bagging", "boosting", "random forest", "voting"]},
-            {"question": "Describe the ROC curve and AUC metric.", "category": "Evaluation", "keywords": ["ROC", "AUC", "true positive", "false positive", "threshold"]},
-            {"question": "What is regularization and why do we use it?", "category": "Regularization", "keywords": ["regularization", "L1", "L2", "overfitting", "penalty"]},
-        ],
-        "Advanced": [
-            {"question": "Explain the architecture of a Transformer model.", "category": "Deep Learning", "keywords": ["transformer", "attention", "encoder", "decoder", "self-attention"]},
-            {"question": "How do you optimize hyperparameters in deep learning?", "category": "Optimization", "keywords": ["hyperparameter", "grid search", "random search", "bayesian", "tuning"]},
-        ]
-    },
-    "ML Engineer": {
-        "Beginner": [
-            {"question": "What is the difference between batch and online learning?", "category": "ML Systems", "keywords": ["batch", "online", "real-time", "incremental", "streaming"]},
-            {"question": "How do you deploy a machine learning model?", "category": "MLOps", "keywords": ["deployment", "API", "docker", "serving", "production"]},
-            {"question": "What is model monitoring and why is it important?", "category": "MLOps", "keywords": ["monitoring", "drift", "performance", "metrics", "alerts"]},
-            {"question": "Explain the concept of A/B testing for ML models.", "category": "Testing", "keywords": ["A/B", "testing", "control", "treatment", "experiment"]},
-        ],
-        "Intermediate": [
-            {"question": "Explain model versioning and experiment tracking.", "category": "MLOps", "keywords": ["versioning", "experiment", "tracking", "mlflow", "wandb"]},
-            {"question": "What is data drift and how do you detect it?", "category": "Production ML", "keywords": ["drift", "distribution", "monitoring", "feature", "statistical"]},
-            {"question": "How do you handle model retraining in production?", "category": "MLOps", "keywords": ["retraining", "pipeline", "automated", "triggers", "continuous"]},
-        ]
-    },
-    "Software Engineer": {
-        "Beginner": [
-            {"question": "What is the difference between a list and a tuple in Python?", "category": "Python Basics", "keywords": ["list", "tuple", "mutable", "immutable", "ordered"]},
-            {"question": "Explain object-oriented programming concepts.", "category": "OOP", "keywords": ["OOP", "class", "object", "inheritance", "polymorphism", "encapsulation"]},
-            {"question": "What is a REST API?", "category": "Web Development", "keywords": ["REST", "API", "HTTP", "GET", "POST", "endpoint"]},
-            {"question": "Explain the difference between SQL and NoSQL databases.", "category": "Databases", "keywords": ["SQL", "NoSQL", "relational", "document", "schema"]},
-        ],
-        "Intermediate": [
-            {"question": "What are design patterns and give examples?", "category": "Software Design", "keywords": ["design patterns", "singleton", "factory", "observer", "strategy"]},
-            {"question": "Explain asynchronous programming in Python.", "category": "Concurrency", "keywords": ["async", "await", "coroutine", "asyncio", "concurrent"]},
-        ]
-    }
-}
 
 # ═══════════════════════════════════════════════════════════
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════
 st.sidebar.title("🎯 Navigation")
-page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview", "📊 Results"])
+page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview", "📊 Results", "📈 Progress"])
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Settings")
 
-job_role = st.sidebar.selectbox("Role:", ["Data Scientist", "ML Engineer", "Software Engineer"])
-difficulty = st.sidebar.select_slider("Difficulty:", ["Beginner", "Intermediate", "Advanced"])
+job_role = st.sidebar.selectbox("Position:", IT_JOB_ROLES)
+difficulty = st.sidebar.select_slider("Level:", ["Beginner", "Intermediate", "Advanced"])
+interview_mode = st.sidebar.selectbox("Mode:", list(INTERVIEW_MODES.keys()))
+st.sidebar.info(INTERVIEW_MODES[interview_mode])
 
 st.sidebar.markdown("---")
 
-# Status indicators
-if GROQ_API_KEY and GROQ_API_KEY != "YOUR_GROQ_API_KEY_HERE":
-    st.sidebar.success("🤖 AI: Enabled")
+if GROQ_API_KEY:
+    st.sidebar.success("🤖 AI: Active")
+    st.sidebar.caption("✅ Conversation Memory\n✅ Adaptive Questions\n✅ Detailed Rubric")
 else:
-    st.sidebar.warning("⚠️ AI: Disabled")
-
-if st.session_state.resume_skills:
-    total_skills = sum(len(skills) for skills in st.session_state.resume_skills.values())
-    st.sidebar.success(f"📄 Resume: {total_skills} skills")
-    st.sidebar.metric("Match Score", f"{st.session_state.resume_score}%")
-else:
-    st.sidebar.info("📄 Resume: Not uploaded")
+    st.sidebar.warning("⚠️ AI: Limited")
 
 # ═══════════════════════════════════════════════════════════
-# HOME PAGE
+# HOME
 # ═══════════════════════════════════════════════════════════
 if page == "🏠 Home":
-    st.markdown("<h1 class='main-header'>🎤 AI Interview Prep</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='sub-header'>Ace your next interview with AI-powered feedback!</p>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-header'>🎤 AI-Powered Interview Preparation System</h1>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("<div class='feature-box'><h3>📄 Resume Parser</h3><p>Extract skills automatically & get match score</p></div>", unsafe_allow_html=True)
+        st.markdown("<div class='feature-box'><h3>💬 Conversation Memory</h3><p>AI references your previous answers</p></div>", unsafe_allow_html=True)
     with col2:
-        st.markdown("<div class='feature-box'><h3>🤖 AI Evaluation</h3><p>Smart answer analysis with detailed feedback</p></div>", unsafe_allow_html=True)
+        st.markdown("<div class='feature-box'><h3>🎯 Adaptive Follow-ups</h3><p>Dynamic questions based on depth</p></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown("<div class='feature-box'><h3>🎨 3D Avatar</h3><p>Realistic interviewer with voice</p></div>", unsafe_allow_html=True)
+        st.markdown("<div class='feature-box'><h3>📊 Detailed Rubric</h3><p>5-category scoring breakdown</p></div>", unsafe_allow_html=True)
     
     st.markdown("---")
     
-    avg = sum(st.session_state.scores) / len(st.session_state.scores) if st.session_state.scores else 0
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Interviews", "1" if len(st.session_state.answers) > 0 else "0")
-    col2.metric("Avg Score", f"{avg:.0f}%")
-    col3.metric("Answered", len(st.session_state.answers))
-    col4.metric("Resume Match", f"{st.session_state.resume_score}%")
-    
-    st.markdown("---")
-    
-    st.subheader("🚀 Getting Started")
-    st.markdown("""
-    <div class='feature-box'>
-    <h3>Step-by-Step Guide:</h3>
-    <p><strong>1. 📄 Upload Resume</strong> - Get your skills analyzed and match score</p>
-    <p><strong>2. ⚙️ Select Settings</strong> - Choose job role and difficulty</p>
-    <p><strong>3. 🎤 Start Interview</strong> - Answer questions (avatar will speak!)</p>
-    <p><strong>4. 📊 View Results</strong> - Get AI-powered detailed feedback</p>
-    </div>
-    """, unsafe_allow_html=True)
+    if st.session_state.session_history:
+        avg_scores = [s['avg'] for s in st.session_state.session_history]
+        improvement = avg_scores[-1] - avg_scores[0] if len(avg_scores) > 1 else 0
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Sessions", len(st.session_state.session_history))
+        col2.metric("Latest Score", f"{avg_scores[-1]:.0f}%")
+        col3.metric("Improvement", f"{improvement:+.0f}%", delta_color="normal")
 
 # ═══════════════════════════════════════════════════════════
-# RESUME PAGE - WITH SCORING
+# RESUME PAGE
 # ═══════════════════════════════════════════════════════════
 elif page == "📄 Resume":
-    st.title("📄 Resume Analysis & Scoring")
+    st.title("📄 Resume Analysis")
     
-    uploaded_file = st.file_uploader("Upload your resume (PDF)", type=['pdf'])
+    uploaded = st.file_uploader("Upload PDF", type=['pdf'])
     
-    if uploaded_file:
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.success(f"✅ Uploaded: {uploaded_file.name}")
-            
-            if st.button("🔍 Analyze Resume", use_container_width=True):
-                with st.spinner("🤖 Analyzing your resume..."):
-                    text, skills, experience = parse_resume(uploaded_file)
-                    st.session_state.resume_text = text
-                    st.session_state.resume_skills = skills
-                    st.session_state.resume_experience = experience
-                    st.session_state.resume_score = calculate_resume_score(skills, experience, job_role)
-                    
-                    st.success("✅ Analysis complete!")
-                    st.balloons()
-                    st.rerun()
-        
-        with col2:
-            if st.button("🗑️ Clear Resume", use_container_width=True):
-                st.session_state.resume_text = ""
-                st.session_state.resume_skills = {}
-                st.session_state.resume_experience = 0
-                st.session_state.resume_score = 0
-                st.rerun()
+    if uploaded and st.button("🔍 Analyze"):
+        with st.spinner("Analyzing..."):
+            text, skills, exp = parse_resume(uploaded)
+            st.session_state.resume_skills = skills
+            st.session_state.resume_experience = exp
+            st.session_state.resume_score = calculate_resume_score(skills, exp, job_role)
+            st.balloons()
+            st.rerun()
     
-    # Show results
     if st.session_state.resume_skills:
         st.markdown("---")
-        
-        # BIG SCORE DISPLAY
         score = st.session_state.resume_score
-        score_color = "#4caf50" if score >= 70 else "#ff9800" if score >= 50 else "#f44336"
-        
-        st.markdown(f"""
-        <div class='resume-score-box' style='background: linear-gradient(135deg, {score_color}aa 0%, {score_color} 100%);'>
-            <h1>{score}%</h1>
-            <p>Resume Match for {job_role}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Recommendation
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Experience", f"{st.session_state.resume_experience}+ years")
-        with col2:
-            total_skills = sum(len(skills) for skills in st.session_state.resume_skills.values())
-            st.metric("Total Skills", total_skills)
-        with col3:
-            categories = len(st.session_state.resume_skills)
-            st.metric("Skill Categories", categories)
-        
-        st.markdown("---")
-        
-        # Skills by category
-        st.subheader("🏷️ Detected Skills by Category")
-        
-        for category, skills_list in st.session_state.resume_skills.items():
-            with st.expander(f"**{category}** ({len(skills_list)} skills)", expanded=True):
-                skills_html = ""
-                for skill in skills_list:
-                    skills_html += f'<span class="skill-badge">{skill}</span>'
-                st.markdown(skills_html, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Recommendations
-        st.subheader("💡 Recommendations")
-        
-        if score >= 80:
-            st.markdown("<div class='strength-box'>🌟 <strong>Excellent Match!</strong> Your resume is well-suited for this role. You're ready to interview!</div>", unsafe_allow_html=True)
-        elif score >= 60:
-            st.markdown("<div class='strength-box'>👍 <strong>Good Match!</strong> Your resume shows relevant experience. Consider highlighting more specific projects.</div>", unsafe_allow_html=True)
-        elif score >= 40:
-            st.markdown("<div class='improvement-box'>⚠️ <strong>Moderate Match.</strong> Consider adding more relevant skills and projects for this role.</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='improvement-box'>❌ <strong>Limited Match.</strong> Focus on building more relevant skills for this role.</div>", unsafe_allow_html=True)
-        
-        st.success("🎯 Ready for interview! Go to Interview page to start.")
+        st.markdown(f"<div class='score-card'><h2>{score}%</h2><p>Match for {job_role}</p></div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════
-# INTERVIEW PAGE
+# INTERVIEW PAGE - WITH ALL PREMIUM FEATURES
 # ═══════════════════════════════════════════════════════════
 elif page == "🎤 Interview":
-    st.title("🎤 AI Interview")
+    st.title("🎤 Professional Interview Simulation")
     
-    col1, col2 = st.columns([3,1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        st.markdown(f"### 🎯 {job_role} | {difficulty}")
+        st.markdown(f"### 🎯 {job_role} | {interview_mode}")
     with col2:
         elapsed = (datetime.now() - st.session_state.start_time).seconds
         mins, secs = divmod(elapsed, 60)
         st.markdown(f"### ⏱️ {mins:02d}:{secs:02d}")
+    with col3:
+        if st.session_state.question_start_time:
+            q_elapsed = (datetime.now() - st.session_state.question_start_time).seconds
+            st.markdown(f"### 🕐 {q_elapsed}s")
     
     st.markdown("---")
     
-    # 3D Avatar iframe
+    # 3D AVATAR
     st.subheader("🤖 AI Interviewer")
     st.components.v1.iframe("https://interview-prep-system.vercel.app/", height=600, scrolling=False)
     
     st.markdown("---")
     
-    questions = QUESTIONS_DB.get(job_role, {}).get(difficulty, QUESTIONS_DB["Data Scientist"]["Beginner"])
+    # NOT STARTED
+    if st.session_state.interview_stage == 'not_started':
+        st.markdown(f"""<div class='feature-box'>
+        <h3>Interview Structure:</h3>
+        <p><strong>Round 1:</strong> Introduction (3 questions)</p>
+        <p><strong>Round 2:</strong> Technical Assessment (5 adaptive questions)</p>
+        <p><strong>Features:</strong> Conversation memory, follow-up questions, detailed scoring rubric</p>
+        </div>""", unsafe_allow_html=True)
+        
+        if st.button("🚀 START INTERVIEW", use_container_width=True, type="primary"):
+            st.session_state.interview_stage = 'intro'
+            st.session_state.question_num = 1
+            st.session_state.start_time = datetime.now()
+            st.session_state.question_start_time = datetime.now()
+            st.session_state.intro_questions = get_intro_questions(job_role)
+            st.rerun()
     
-    if st.session_state.question_num > len(questions):
-        st.success("🎉 Interview Complete!")
-        st.info("📊 Check Results page for feedback!")
-    else:
-        q_idx = st.session_state.question_num - 1
-        q = questions[q_idx]
+    # INTRO STAGE
+    elif st.session_state.interview_stage == 'intro':
+        intro_qs = st.session_state.intro_questions
         
-        # Store current question for voice trigger
-        st.session_state.current_question = q['question']
-        
-        st.subheader(f"❓ Question {st.session_state.question_num} of {len(questions)}")
-        
-        # READABLE QUESTION BOX
-        st.markdown(f"""
-        <div class='feature-box'>
-            <h3>{q['question']}</h3>
-            <p><strong>Category:</strong> {q['category']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # TTS Button to trigger avatar speech
-        if st.button("🔊 Hear Question (Avatar will speak)", use_container_width=True):
-            st.info("🎙️ Listen to the avatar in the iframe above!")
-            # The frontend will handle the actual TTS
-        
-        # Answer input
-        answer = st.text_area(
-            "Your answer:", 
-            height=150, 
-            key=f"a{st.session_state.question_num}",
-            placeholder="Type your detailed answer here. Be specific and use examples!\n\nTip: Aim for at least 50 words for better evaluation."
-        )
-        
-        col1, col2, col3 = st.columns([2, 1, 1])
-        
-        with col1:
-            if st.button("📤 Submit Answer", use_container_width=True, type="primary"):
+        if st.session_state.question_num <= len(intro_qs):
+            q = intro_qs[st.session_state.question_num - 1]
+            
+            st.subheader(f"Introduction - Question {st.session_state.question_num} of {len(intro_qs)}")
+            st.markdown(f"""<div class='feature-box'><h3>{q['question']}</h3></div>""", unsafe_allow_html=True)
+            
+            # Timer warning
+            if st.session_state.question_start_time:
+                elapsed = (datetime.now() - st.session_state.question_start_time).seconds
+                if interview_mode == "Strict Interview" and elapsed > 90:
+                    st.markdown("<div class='timer-warning'>⚠️ Recommended time: 60-90 seconds</div>", unsafe_allow_html=True)
+            
+            answer = st.text_area("Your Answer:", height=120, key=f"intro_{st.session_state.question_num}")
+            
+            if st.button("📤 Submit", use_container_width=True, type="primary"):
                 if answer and len(answer.strip()) > 10:
-                    with st.spinner("🤖 AI is evaluating..."):
-                        result = ai_evaluate_answer(q['question'], answer, q['keywords'])
+                    answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
+                    
+                    st.session_state.conversation_history.append({"q": q['question'], "a": answer})
+                    st.session_state.answers.append({
+                        "q": q['question'],
+                        "a": answer,
+                        "category": q['category'],
+                        "is_intro": True,
+                        "time_taken": answer_time
+                    })
+                    
+                    st.session_state.question_num += 1
+                    st.session_state.question_start_time = datetime.now()
+                    
+                    if st.session_state.question_num > len(intro_qs):
+                        st.session_state.interview_stage = 'technical'
+                        st.session_state.question_num = 1
                         
-                        st.session_state.answers.append({
-                            "q": q['question'],
-                            "a": answer,
-                            "category": q['category'],
-                            "score": result['score'],
-                            "strengths": result.get('strengths', []),
-                            "improvements": result.get('improvements', []),
-                            "feedback": result.get('feedback', '')
-                        })
-                        st.session_state.scores.append(result['score'])
-                        
-                        st.success(f"✅ Score: {result['score']}/100")
-                        st.info(f"💬 {result['feedback']}")
-                        
-                        if result.get('strengths'):
-                            st.markdown("**✨ Strengths:**")
-                            for s in result['strengths']:
-                                st.markdown(f"<div class='strength-box'>✓ {s}</div>", unsafe_allow_html=True)
-                        
-                        if result.get('improvements'):
-                            st.markdown("**💡 Improvements:**")
-                            for imp in result['improvements']:
-                                st.markdown(f"<div class='improvement-box'>→ {imp}</div>", unsafe_allow_html=True)
-                        
-                        st.session_state.question_num += 1
-                        st.balloons()
-                        
-                        if st.button("➡️ Next Question"):
-                            st.rerun()
+                        with st.spinner(f"Generating personalized {job_role} questions..."):
+                            st.session_state.technical_questions = generate_personalized_questions(
+                                job_role, difficulty, st.session_state.resume_skills, 
+                                st.session_state.conversation_history, 5
+                            )
+                        st.success("✅ Questions generated with conversation context!")
+                    
+                    st.rerun()
                 else:
-                    st.error("⚠️ Please provide a detailed answer (min 10 characters)")
+                    st.error("⚠️ Please provide an answer")
+    
+    # TECHNICAL STAGE
+    elif st.session_state.interview_stage == 'technical':
+        questions = st.session_state.technical_questions
         
-        with col2:
-            word_count = len(answer.split()) if answer else 0
-            st.metric("Words", word_count)
-        
-        with col3:
-            char_count = len(answer) if answer else 0
-            st.metric("Characters", char_count)
-        
-        st.progress(st.session_state.question_num / len(questions))
+        if st.session_state.question_num <= len(questions):
+            q = questions[st.session_state.question_num - 1]
+            
+            st.subheader(f"Technical - Question {st.session_state.question_num} of {len(questions)}")
+            st.markdown(f"""<div class='feature-box'><h3>{q['question']}</h3>
+            <p><strong>Type:</strong> {q.get('type', 'conceptual').title()} | <strong>Category:</strong> {q['category']}</p>
+            </div>""", unsafe_allow_html=True)
+            
+            # Timer
+            if st.session_state.question_start_time:
+                elapsed = (datetime.now() - st.session_state.question_start_time).seconds
+                if interview_mode == "Strict Interview" and elapsed > 240:
+                    st.markdown("<div class='timer-warning'>⚠️ Recommended time: 2-4 minutes for technical questions</div>", unsafe_allow_html=True)
+            
+            answer = st.text_area("Your Answer:", height=150, key=f"tech_{st.session_state.question_num}",
+                                placeholder="Provide detailed answer with examples...")
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if st.button("📤 Submit Answer", use_container_width=True, type="primary"):
+                    if answer and len(answer.strip()) > 15:
+                        answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
+                        
+                        with st.spinner("AI Evaluating with detailed rubric..."):
+                            result = evaluate_with_rubric(q['question'], answer, q['keywords'], q.get('type', 'conceptual'))
+                            
+                            st.session_state.conversation_history.append({"q": q['question'], "a": answer})
+                            st.session_state.answers.append({
+                                "q": q['question'],
+                                "a": answer,
+                                "category": q['category'],
+                                "score": result['total_score'],
+                                "rubric": result['rubric'],
+                                "strengths": result['strengths'],
+                                "improvements": result['improvements'],
+                                "ideal_answer": result.get('ideal_answer_outline', []),
+                                "rewritten": result.get('rewritten_answer', ''),
+                                "feedback": result['feedback'],
+                                "time_taken": answer_time,
+                                "followup": result.get('followup_question', '')
+                            })
+                            st.session_state.scores.append(result['total_score'])
+                            st.session_state.rubric_scores.append(result['rubric'])
+                            
+                            # Show detailed feedback
+                            st.success(f"✅ Total Score: {result['total_score']}/100")
+                            
+                            # Rubric breakdown
+                            st.markdown("**📊 Scoring Rubric:**")
+                            cols = st.columns(5)
+                            rubric = result['rubric']
+                            cols[0].metric("Correctness", f"{rubric['correctness']}/40")
+                            cols[1].metric("Depth", f"{rubric['depth']}/25")
+                            cols[2].metric("Clarity", f"{rubric['clarity']}/15")
+                            cols[3].metric("Structure", f"{rubric['structure']}/10")
+                            cols[4].metric("Real-world", f"{rubric['real_world']}/10")
+                            
+                            # Ideal answer
+                            if result.get('ideal_answer_outline'):
+                                st.markdown("**✨ Ideal Answer Outline:**")
+                                st.markdown("<div class='ideal-answer'>" + "<br>".join([f"• {point}" for point in result['ideal_answer_outline']]) + "</div>", unsafe_allow_html=True)
+                            
+                            # Rewritten answer
+                            if result.get('rewritten_answer'):
+                                st.markdown("**✍️ Professional Interview Version:**")
+                                st.markdown(f"<div class='rewritten-answer'>{result['rewritten_answer']}</div>", unsafe_allow_html=True)
+                            
+                            # Time feedback
+                            if answer_time < 60:
+                                st.info("💡 Consider taking more time to elaborate")
+                            elif answer_time > 300:
+                                st.info("💡 Try to be more concise (aim for 2-4 minutes)")
+                            
+                            # Follow-up
+                            if result.get('needs_followup') and result.get('followup_question'):
+                                st.warning(f"🔄 Follow-up: {result['followup_question']}")
+                            
+                            st.session_state.question_num += 1
+                            st.session_state.question_start_time = datetime.now()
+                            
+                            if st.session_state.question_num > len(questions):
+                                st.session_state.interview_stage = 'complete'
+                            
+                            st.balloons()
+                            time.sleep(3)
+                            st.rerun()
+                    else:
+                        st.error("⚠️ Please provide detailed answer")
+            
+            with col2:
+                words = len(answer.split()) if answer else 0
+                st.metric("Words", words)
+            
+            progress = (st.session_state.question_num - 1) / len(questions)
+            st.progress(min(progress, 1.0))
+    
+    # COMPLETE
+    elif st.session_state.interview_stage == 'complete':
+        st.success("🎉 Interview Complete!")
+        st.info("📊 Check Results page for detailed feedback and improvement plan")
 
 # ═══════════════════════════════════════════════════════════
-# RESULTS PAGE
+# RESULTS PAGE - PREMIUM
 # ═══════════════════════════════════════════════════════════
 elif page == "📊 Results":
-    st.title("📊 Interview Performance Report")
+    st.title("📊 Comprehensive Performance Report")
     
     if not st.session_state.answers:
-        st.warning("⚠️ No interview completed yet!")
-        st.info("👈 Start from Interview page!")
+        st.warning("⚠️ No interview completed")
     else:
-        avg = sum(st.session_state.scores) / len(st.session_state.scores)
-        mins = (datetime.now() - st.session_state.start_time).seconds // 60
+        tech_answers = [a for a in st.session_state.answers if not a.get('is_intro')]
+        tech_scores = [a['score'] for a in tech_answers]
+        avg = sum(tech_scores) / len(tech_scores) if tech_scores else 0
+        
+        # Save to history
+        if avg > 0 and not any(s.get('timestamp') == datetime.now().strftime('%Y-%m-%d %H:%M') for s in st.session_state.session_history):
+            st.session_state.session_history.append({
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M'),
+                "role": job_role,
+                "avg": avg,
+                "scores": tech_scores
+            })
         
         col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown(f"<div class='score-card'><h2>{avg:.0f}%</h2><p>Overall Score</p></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='score-card'><h2>{len(st.session_state.answers)}</h2><p>Questions</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='score-card'><h2>{len(tech_scores)}</h2><p>Questions</p></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='score-card'><h2>{mins}</h2><p>Minutes</p></div>", unsafe_allow_html=True)
+            avg_time = sum([a.get('time_taken', 0) for a in tech_answers]) / len(tech_answers) if tech_answers else 0
+            st.markdown(f"<div class='score-card'><h2>{avg_time:.0f}s</h2><p>Avg Time</p></div>", unsafe_allow_html=True)
         
         st.markdown("---")
         
-        st.subheader("📈 Performance by Category")
-        category_scores = {}
-        for ans in st.session_state.answers:
-            cat = ans.get('category', 'General')
-            if cat not in category_scores:
-                category_scores[cat] = []
-            category_scores[cat].append(ans['score'])
-        
-        category_avg = {cat: sum(scores)/len(scores) for cat, scores in category_scores.items()}
-        df = pd.DataFrame(list(category_avg.items()), columns=['Category', 'Average Score'])
-        st.bar_chart(df.set_index('Category'))
+        # Radar chart for rubric
+        if st.session_state.rubric_scores:
+            st.subheader("📊 Performance Radar")
+            avg_rubric = {
+                "Correctness": sum([r['correctness'] for r in st.session_state.rubric_scores]) / len(st.session_state.rubric_scores),
+                "Depth": sum([r['depth'] for r in st.session_state.rubric_scores]) / len(st.session_state.rubric_scores),
+                "Clarity": sum([r['clarity'] for r in st.session_state.rubric_scores]) / len(st.session_state.rubric_scores),
+                "Structure": sum([r['structure'] for r in st.session_state.rubric_scores]) / len(st.session_state.rubric_scores),
+                "Real-world": sum([r['real_world'] for r in st.session_state.rubric_scores]) / len(st.session_state.rubric_scores)
+            }
+            
+            df = pd.DataFrame(list(avg_rubric.items()), columns=['Category', 'Score'])
+            st.bar_chart(df.set_index('Category'))
         
         st.markdown("---")
         
+        # Detailed Q&A
         st.subheader("📝 Question-by-Question Analysis")
+        for i, ans in enumerate(tech_answers, 1):
+            with st.expander(f"Q{i}: {ans['q'][:50]}... | {ans['score']}/100"):
+                st.markdown(f"**Question:** {ans['q']}")
+                st.markdown(f"**Your Answer:** {ans['a']}")
+                st.markdown(f"**Score:** {ans['score']}/100 | **Time:** {ans.get('time_taken', 0)}s")
+                
+                if ans.get('ideal_answer'):
+                    st.markdown("**✨ Ideal Answer:**")
+                    for point in ans['ideal_answer']:
+                        st.markdown(f"• {point}")
+                
+                if ans.get('rewritten'):
+                    st.markdown(f"**✍️ Professional Version:** {ans['rewritten']}")
         
-        for i, ans in enumerate(st.session_state.answers, 1):
-            with st.expander(f"Q{i}: {ans['q'][:60]}... | Score: {ans['score']}/100"):
-                st.markdown(f"**📋 Question:** {ans['q']}")
-                st.markdown(f"**📂 Category:** {ans.get('category', 'General')}")
-                st.markdown(f"**✍️ Your Answer:** {ans['a']}")
-                st.markdown(f"**🎯 Score:** {ans['score']}/100")
+        st.markdown("---")
+        
+        # 7-Day Improvement Plan
+        st.subheader("📈 Personalized 7-Day Improvement Plan")
+        
+        if st.button("Generate Improvement Plan", use_container_width=True):
+            with st.spinner("Creating personalized plan..."):
+                category_scores = {}
+                for ans in tech_answers:
+                    cat = ans['category']
+                    if cat not in category_scores:
+                        category_scores[cat] = []
+                    category_scores[cat].append(ans['score'])
                 
-                if ans.get('feedback'):
-                    st.info(f"💬 {ans['feedback']}")
+                plan = generate_improvement_plan(category_scores, job_role)
                 
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    if ans.get('strengths'):
-                        st.markdown("**✨ Strengths:**")
-                        for s in ans['strengths']:
-                            st.markdown(f"- ✓ {s}")
-                
-                with col2:
-                    if ans.get('improvements'):
-                        st.markdown("**💡 Improvements:**")
-                        for imp in ans['improvements']:
-                            st.markdown(f"- → {imp}")
+                for day in plan:
+                    with st.expander(f"Day {day['day']}: {day.get('focus', 'Practice')}"):
+                        st.markdown(f"**Focus:** {day.get('focus', '')}")
+                        if day.get('tasks'):
+                            st.markdown("**Tasks:**")
+                            for task in day['tasks']:
+                                st.markdown(f"• {task}")
+                        if day.get('resources'):
+                            st.markdown("**Resources:**")
+                            for res in day['resources']:
+                                st.markdown(f"• {res}")
         
         st.markdown("---")
         
         col1, col2 = st.columns(2)
-        
         with col1:
-            report_data = {
-                "interview_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "job_role": job_role,
-                "difficulty": difficulty,
+            report = {
+                "timestamp": datetime.now().isoformat(),
+                "role": job_role,
+                "mode": interview_mode,
                 "overall_score": round(avg, 2),
-                "total_questions": len(st.session_state.answers),
-                "time_taken_minutes": mins,
-                "resume_match_score": st.session_state.resume_score,
-                "answers": st.session_state.answers
+                "rubric_breakdown": avg_rubric if st.session_state.rubric_scores else {},
+                "answers": tech_answers
             }
-            
-            st.download_button(
-                "📥 Download Report (JSON)",
-                data=json.dumps(report_data, indent=2),
-                file_name=f"interview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
+            st.download_button("📥 Download Full Report", json.dumps(report, indent=2), 
+                             f"interview_{job_role.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.json", 
+                             use_container_width=True)
         
         with col2:
             if st.button("🔄 Start New Interview", use_container_width=True):
-                st.session_state.question_num = 1
-                st.session_state.answers = []
-                st.session_state.scores = []
-                st.session_state.start_time = datetime.now()
-                st.success("✅ Reset complete!")
+                keys_to_reset = ['interview_stage', 'question_num', 'answers', 'scores', 'rubric_scores',
+                                'technical_questions', 'intro_questions', 'conversation_history', 
+                                'question_start_time']
+                for key in keys_to_reset:
+                    if key in st.session_state:
+                        if key in ['answers', 'scores', 'rubric_scores', 'technical_questions', 
+                                   'intro_questions', 'conversation_history']:
+                            st.session_state[key] = []
+                        elif key == 'interview_stage':
+                            st.session_state[key] = 'not_started'
+                        else:
+                            st.session_state[key] = 0 if 'num' in key else None
                 st.rerun()
 
+# ═══════════════════════════════════════════════════════════
+# PROGRESS TRACKING
+# ═══════════════════════════════════════════════════════════
+elif page == "📈 Progress":
+    st.title("📈 Progress Tracking")
+    
+    if st.session_state.session_history:
+        df = pd.DataFrame(st.session_state.session_history)
+        
+        st.subheader("Score Improvement Over Time")
+        st.line_chart(df.set_index('timestamp')['avg'])
+        
+        st.subheader("Session History")
+        st.dataframe(df)
+        
+        if len(df) > 1:
+            improvement = df['avg'].iloc[-1] - df['avg'].iloc[0]
+            st.metric("Total Improvement", f"{improvement:+.1f}%")
+    else:
+        st.info("Complete interviews to track your progress!")
+
 st.markdown("---")
-st.markdown("<div style='text-align:center;color:#888'><p>Built with ❤️ | React + Streamlit + Groq AI | BCA Final Year Project 2025</p></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#888'><p>AI-Powered Interview Preparation System | Premium Features</p></div>", unsafe_allow_html=True)
