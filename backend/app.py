@@ -15,7 +15,7 @@ st.set_page_config(page_title="AI Interview Prep", page_icon="🎤", layout="wid
 
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173") 
 
 # ═══════════════════════════════════════════════════════════
 # SQLITE DATABASE FOR PERSISTENT MEMORY
@@ -751,7 +751,7 @@ elif page == "🎙️ Voice Interview":  # NEW PAGE
     # Embed voice interview (adjust port if needed)
     st.components.v1.html("""
     <iframe 
-        src="https://interview-prep-system.vercel.app/" 
+        src="{FRONTEND_URL}/voice" 
         width="100%" 
         height="900" 
         frameborder="0"
