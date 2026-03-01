@@ -7,7 +7,7 @@ import * as THREE from "three";
 // ═══════════════════════════════════════════════════════════
 // AVATAR - GUARANTEED IDLE START (YOUR WORKING PATTERN)
 // ═══════════════════════════════════════════════════════════
-function Avatar({ isTalking, position = [0, 0.10, 0.2] }) {
+function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
   const group = useRef();
   const initializedRef = useRef(false);
   const currentAction = useRef(null);
