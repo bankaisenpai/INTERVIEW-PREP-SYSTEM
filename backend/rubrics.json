@@ -1,0 +1,70 @@
+{
+  "Data Scientist": {
+    "categories": {
+      "technical_accuracy": {
+        "weight": 35,
+        "description": "Correctness of ML/stats concepts"
+      },
+      "problem_solving": {
+        "weight": 25,
+        "description": "Approach to data problems"
+      },
+      "communication": {
+        "weight": 20,
+        "description": "Clarity in explaining concepts"
+      },
+      "experience": {
+        "weight": 20,
+        "description": "Relevant project work"
+      }
+    }
+  },
+  "Frontend Developer": {
+    "categories": {
+      "technical_knowledge": {
+        "weight": 30,
+        "description": "JS/React/framework knowledge"
+      },
+      "code_quality": {
+        "weight": 25,
+        "description": "Clean code principles"
+      },
+      "ui_ux_sense": {
+        "weight": 20,
+        "description": "Design and user experience understanding"
+      },
+      "performance": {
+        "weight": 15,
+        "description": "Optimization awareness"
+      },
+      "communication": {
+        "weight": 10,
+        "description": "Explaining technical decisions"
+      }
+    }
+  },
+  "Backend Developer": {
+    "categories": {
+      "system_design": {
+        "weight": 30,
+        "description": "Architecture and scalability"
+      },
+      "database_skills": {
+        "weight": 25,
+        "description": "SQL/NoSQL proficiency"
+      },
+      "api_design": {
+        "weight": 20,
+        "description": "RESTful principles"
+      },
+      "security": {
+        "weight": 15,
+        "description": "Auth, encryption, best practices"
+      },
+      "experience": {
+        "weight": 10,
+        "description": "Production system work"
+      }
+    }
+  }
+}

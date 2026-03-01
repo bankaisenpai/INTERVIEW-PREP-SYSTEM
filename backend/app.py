@@ -452,7 +452,7 @@ st.markdown("""
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════
 st.sidebar.title("🎯 Navigation")
-page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview", "📊 Results", "📈 Progress"])
+page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview","🎙️ Voice Interview", "📊 Results", "📈 Progress"])
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Settings")
@@ -720,5 +720,43 @@ elif page == "📈 Progress":
     else:
         st.info("Complete interviews to track progress!")
 
-st.markdown("---")
+# Add this BEFORE the final st.markdown line at the bottom
+
+elif page == "🎙️ Voice Interview":  # NEW PAGE
+    st.title("🎙️ Voice-Based Interview Mode")
+    
+    st.info("💡 This feature uses the FastAPI voice server. Make sure it's running on port 8000!")
+    
+    # Show instructions
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("### ✅ Requirements")
+        st.markdown("""
+        - FastAPI server running: `uvicorn api_extensions:app --port 8000`
+        - Microphone permission in browser
+        - Chrome/Edge browser (Safari has limited support)
+        """)
+    
+    with col2:
+        st.markdown("### 🎯 Features")
+        st.markdown("""
+        - Real-time voice recognition
+        - Live filler word detection
+        - STAR method analysis
+        - Speaking pace feedback
+        """)
+    
+    st.markdown("---")
+    
+    # Embed voice interview (adjust port if needed)
+    st.components.v1.html("""
+    <iframe 
+        src="http://localhost:5173" 
+        width="100%" 
+        height="900" 
+        frameborder="0"
+        allow="microphone"
+        style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);"
+    ></iframe>
+    """, height=900)
 st.markdown("<div style='text-align:center;color:#888'><p>AI Interview Prep | SQLite Memory | Premium Features</p></div>", unsafe_allow_html=True)

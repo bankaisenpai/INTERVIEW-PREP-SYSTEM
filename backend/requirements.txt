@@ -3,3 +3,7 @@ python-dotenv
 requests
 pandas
 PyPDF2
+fastapi
+uvicorn
+reportlab
+python-multipart

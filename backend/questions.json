@@ -1,0 +1,53 @@
+{
+  "Data Scientist": {
+    "Beginner": [
+      {"question": "What is the difference between supervised and unsupervised learning?", "category": "ML Fundamentals", "keywords": ["supervised", "unsupervised", "labeled", "clustering"]},
+      {"question": "Explain what overfitting means and how to prevent it.", "category": "Model Evaluation", "keywords": ["overfitting", "validation", "regularization", "cross-validation"]},
+      {"question": "What is a confusion matrix?", "category": "Metrics", "keywords": ["confusion matrix", "precision", "recall", "accuracy"]}
+    ],
+    "Intermediate": [
+      {"question": "Explain the bias-variance tradeoff.", "category": "ML Theory", "keywords": ["bias", "variance", "tradeoff", "generalization"]},
+      {"question": "How do you handle imbalanced datasets?", "category": "Data Processing", "keywords": ["imbalanced", "SMOTE", "oversampling", "class weights"]},
+      {"question": "Walk me through a machine learning project you've worked on.", "category": "Experience", "keywords": ["project", "data", "model", "results"]}
+    ],
+    "Advanced": [
+      {"question": "Explain the architecture of a Transformer model.", "category": "Deep Learning", "keywords": ["transformer", "attention", "encoder", "decoder"]},
+      {"question": "How would you optimize hyperparameters in a large-scale ML system?", "category": "MLOps", "keywords": ["hyperparameter", "optimization", "grid search", "bayesian"]},
+      {"question": "Describe a time you improved model performance by 20%+. What was your approach?", "category": "Behavioral", "keywords": ["improvement", "performance", "approach", "results"]}
+    ]
+  },
+  "Frontend Developer": {
+    "Beginner": [
+      {"question": "What is the virtual DOM in React?", "category": "React Basics", "keywords": ["virtual DOM", "reconciliation", "rendering", "performance"]},
+      {"question": "Explain the difference between let, const, and var in JavaScript.", "category": "JavaScript", "keywords": ["let", "const", "var", "scope"]},
+      {"question": "What are React hooks and why do we use them?", "category": "React", "keywords": ["hooks", "useState", "useEffect", "functional"]}
+    ],
+    "Intermediate": [
+      {"question": "How do you optimize React component performance?", "category": "Performance", "keywords": ["memoization", "lazy loading", "code splitting", "useMemo"]},
+      {"question": "Explain state management in React. When would you use Context vs Redux?", "category": "State Management", "keywords": ["context", "redux", "state", "props"]},
+      {"question": "Describe a complex UI component you built. What were the challenges?", "category": "Experience", "keywords": ["component", "challenges", "solution", "UI"]}
+    ],
+    "Advanced": [
+      {"question": "How would you architect a micro-frontend application?", "category": "Architecture", "keywords": ["micro-frontend", "architecture", "modules", "integration"]},
+      {"question": "Explain your approach to ensuring accessibility in web applications.", "category": "Accessibility", "keywords": ["accessibility", "ARIA", "screen readers", "WCAG"]},
+      {"question": "Tell me about a time you had to refactor a large codebase. What was your strategy?", "category": "Behavioral", "keywords": ["refactor", "strategy", "codebase", "improvement"]}
+    ]
+  },
+  "Backend Developer": {
+    "Beginner": [
+      {"question": "What is a REST API and what are HTTP methods?", "category": "APIs", "keywords": ["REST", "HTTP", "GET", "POST", "API"]},
+      {"question": "Explain the difference between SQL and NoSQL databases.", "category": "Databases", "keywords": ["SQL", "NoSQL", "relational", "document"]},
+      {"question": "What is middleware in a web application?", "category": "Architecture", "keywords": ["middleware", "request", "response", "processing"]}
+    ],
+    "Intermediate": [
+      {"question": "How do you design a database schema for a social media platform?", "category": "System Design", "keywords": ["schema", "database", "relationships", "indexes"]},
+      {"question": "Explain authentication vs authorization. How would you implement them?", "category": "Security", "keywords": ["authentication", "authorization", "JWT", "sessions"]},
+      {"question": "Describe a microservices project you've worked on. What were the challenges?", "category": "Experience", "keywords": ["microservices", "challenges", "architecture", "communication"]}
+    ],
+    "Advanced": [
+      {"question": "How would you design a URL shortener like bit.ly that handles 1M requests per second?", "category": "System Design", "keywords": ["scalability", "caching", "distributed", "load balancing"]},
+      {"question": "Explain your approach to database optimization for a high-traffic application.", "category": "Performance", "keywords": ["optimization", "indexing", "caching", "query"]},
+      {"question": "Tell me about a production incident you resolved. What was your debugging process?", "category": "Behavioral", "keywords": ["incident", "debugging", "resolution", "process"]}
+    ]
+  }
+}
