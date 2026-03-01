@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef ,useMemo} from "react";
 import ReactDOM from "react-dom/client";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, useGLTF, useAnimations } from "@react-three/drei";
+import { OrbitControls, useGLTF, useAnimations ,useTexture} from "@react-three/drei";
 import * as THREE from "three";
+
 
 // ═══════════════════════════════════════════════════════════
 // AVATAR - GUARANTEED IDLE START (YOUR WORKING PATTERN)
@@ -91,6 +92,42 @@ function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
   return <primitive ref={group} object={scene} position={position} castShadow />;
 }
 
+function WallArt() {
+  const art = useTexture("/textures/wallart.png");
+
+  // If this line throws error in your three version, remove it.
+    if ("colorSpace" in art) art.colorSpace = THREE.SRGBColorSpace;
+    if ("encoding" in art) art.encoding = THREE.sRGBEncoding;
+
+  return (
+    <group position={[0, 2.2, -3.9]}>
+      {/* Frame */}
+      <mesh castShadow>
+        <boxGeometry args={[0.9, 0.7, 0.04]} />
+        <meshStandardMaterial color="#0f172a" roughness={0.5} metalness={0.2} />
+      </mesh>
+
+      {/* Artwork */}
+      <mesh position={[0, 0, 0.025]}>
+        <planeGeometry args={[0.78, 0.58]} />
+        <meshStandardMaterial map={art} roughness={0.8} />
+      </mesh>
+
+      {/* Glass shine */}
+      <mesh position={[0, 0, 0.028]}>
+        <planeGeometry args={[0.8, 0.6]} />
+        <meshPhysicalMaterial
+          transparent
+          opacity={0.12}
+          roughness={0.08}
+          clearcoat={1}
+          clearcoatRoughness={0.1}
+          color="#ffffff"
+        />
+      </mesh>
+    </group>
+  );
+}
 // ═══════════════════════════════════════════════════════════
 // ENHANCED OFFICE SCENE WITH DECORATIONS
 // ═══════════════════════════════════════════════════════════
@@ -209,40 +246,67 @@ function InterviewScene({ isTalking }) {
       </mesh>
       
       {/* ===== WINDOW ON SIDE WALL ===== */}
-      {/* Window frame */}
-      <mesh position={[-3.5, 2.0, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
-        <boxGeometry args={[2.0, 1.5, 0.08]} />
-        <meshStandardMaterial color="#2c3e50" roughness={0.3} metalness={0.6} />
-      </mesh>
-      
-      {/* Window glass (4 panes) */}
-      {[
-        [-3.45, 2.0, -0.5],
-        [-3.45, 2.0, 0.5],
-        [-3.45, 1.25, -0.5],
-        [-3.45, 1.25, 0.5]
-      ].map((pos, i) => (
-        <mesh key={`window-${i}`} position={pos} rotation={[0, Math.PI / 2, 0]}>
-          <planeGeometry args={[0.9, 0.7]} />
-          <meshStandardMaterial 
-            color="#87ceeb" 
-            transparent 
-            opacity={0.4} 
-            metalness={0.9} 
-            roughness={0.1} 
-          />
-        </mesh>
-      ))}
-      
-      {/* Window cross bars */}
-      <mesh position={[-3.47, 2.0, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <boxGeometry args={[2.0, 0.03, 0.02]} />
-        <meshStandardMaterial color="#1e293b" />
-      </mesh>
-      <mesh position={[-3.47, 2.0, 0]} rotation={[Math.PI / 2, Math.PI / 2, 0]}>
-        <boxGeometry args={[1.5, 0.03, 0.02]} />
-        <meshStandardMaterial color="#1e293b" />
-      </mesh>
+      {/* ===== REALISTIC WINDOW (recess + trim + sill + glass) ===== */}
+<group position={[-3.5, 2.0, 0]} rotation={[0, Math.PI / 2, 0]}>
+  {/* Wall recess (dark hole behind the window) */}
+  <mesh position={[0, 0, -0.06]} receiveShadow>
+    <boxGeometry args={[2.05, 1.55, 0.02]} />
+    <meshStandardMaterial color="#0b1220" roughness={1} />
+  </mesh>
+
+  {/* Outer trim frame (thicker) */}
+  <mesh castShadow>
+    <boxGeometry args={[2.1, 1.6, 0.12]} />
+    <meshStandardMaterial color="#1f2a3a" roughness={0.35} metalness={0.4} />
+  </mesh>
+
+  {/* Inner frame (creates depth so it doesn't look floating) */}
+  <mesh position={[0, 0, 0.06]} castShadow>
+    <boxGeometry args={[1.95, 1.45, 0.06]} />
+    <meshStandardMaterial color="#2c3e50" roughness={0.45} metalness={0.25} />
+  </mesh>
+
+  {/* Window sill */}
+  <mesh position={[0, -0.85, 0.12]} castShadow>
+    <boxGeometry args={[2.2, 0.12, 0.25]} />
+    <meshStandardMaterial color="#2b2f38" roughness={0.6} metalness={0.1} />
+  </mesh>
+
+  {/* Glass (single plane, slightly reflective) */}
+  <mesh position={[0, 0, 0.095]}>
+    <planeGeometry args={[1.85, 1.35]} />
+    <meshPhysicalMaterial
+      transparent
+      opacity={0.22}
+      roughness={0.06}
+      metalness={0}
+      transmission={0.9}     // glass feel
+      thickness={0.2}
+      ior={1.45}
+      clearcoat={1}
+      clearcoatRoughness={0.05}
+      color="#b7d7ff"
+    />
+  </mesh>
+
+  {/* Cross bars (thin) */}
+  <mesh position={[0, 0, 0.11]} castShadow>
+    <boxGeometry args={[1.85, 0.03, 0.02]} />
+    <meshStandardMaterial color="#0f172a" roughness={0.6} />
+  </mesh>
+  <mesh position={[0, 0, 0.11]} rotation={[0, 0, Math.PI / 2]} castShadow>
+    <boxGeometry args={[1.35, 0.03, 0.02]} />
+    <meshStandardMaterial color="#0f172a" roughness={0.6} />
+  </mesh>
+
+  {/* Subtle “outside light” so it looks like daylight coming in */}
+  <rectAreaLight
+    intensity={1.2}
+    width={1.6}
+    height={1.1}
+    position={[0, 0, 0.16]}
+  />
+</group>
       
       {/* ===== POTTED PLANT ===== */}
       {/* Pot */}
@@ -305,18 +369,6 @@ function InterviewScene({ isTalking }) {
         );
       })}
       
-      {/* ===== PICTURE FRAME ON WALL ===== */}
-      <mesh position={[0, 2.2, -3.9]} castShadow>
-        <boxGeometry args={[0.8, 0.6, 0.03]} />
-        <meshStandardMaterial color="#1e293b" />
-      </mesh>
-      
-      {/* Picture (abstract art) */}
-      <mesh position={[0, 2.2, -3.88]}>
-        <planeGeometry args={[0.7, 0.5]} />
-        <meshStandardMaterial color="#4ade80" />
-      </mesh>
-      
       {/* ===== WALLS ===== */}
       {/* Back wall */}
       <mesh position={[0, 2.5, -4]} receiveShadow>
@@ -341,6 +393,7 @@ function InterviewScene({ isTalking }) {
         <cylinderGeometry args={[0.15, 0.25, 0.3, 16]} />
         <meshStandardMaterial color="#fef3c7" emissive="#fef3c7" emissiveIntensity={0.5} />
       </mesh>
+      <WallArt />
       
       {/* Avatar */}
       <Avatar isTalking={isTalking} />
