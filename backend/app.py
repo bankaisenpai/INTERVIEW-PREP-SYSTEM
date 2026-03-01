@@ -751,7 +751,7 @@ elif page == "🎙️ Voice Interview":  # NEW PAGE
     # Embed voice interview (adjust port if needed)
     st.components.v1.html("""
     <iframe 
-        src="http://localhost:5173" 
+        src="https://interview-prep-system.vercel.app/" 
         width="100%" 
         height="900" 
         frameborder="0"

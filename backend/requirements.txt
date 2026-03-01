@@ -7,3 +7,5 @@ fastapi
 uvicorn
 reportlab
 python-multipart
+pydantic
+reportlab
