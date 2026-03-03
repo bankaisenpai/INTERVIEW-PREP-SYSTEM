@@ -6,9 +6,11 @@ import requests
 import PyPDF2
 import io
 import os
+import re
 import random
 import time
 import sqlite3
+import hashlib
 from dotenv import load_dotenv
 
 st.set_page_config(page_title="AI Interview Prep", page_icon="🎤", layout="wide")
@@ -129,7 +131,13 @@ def call_groq_api(prompt, temperature=0.7, max_tokens=1500):
             "temperature": temperature,
             "max_tokens": max_tokens
         }
-        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=20)
+        # ✅ BUG 1 FIXED: Was using FRONTEND_URL (Vercel) instead of Groq's actual API endpoint
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=20
+        )
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         return None
@@ -386,12 +394,204 @@ def extract_experience(text):
     match = re.search(r'(\d+)\+?\s*years?\s+(?:of\s+)?experience', text.lower())
     return int(match.group(1)) if match else 0
 
-def calculate_resume_score(skills, experience, job_role):
-    score = min((sum(len(s) for s in skills.values()) / 8) * 50, 50)
-    score += 30 if experience >= 2 else (experience / 2) * 30
-    score += len(skills) * 4
-    return int(min(score, 100))
 
+
+ROLE_REQUIRED_SKILLS = {
+    "Data Scientist": {
+        "must_have": ["python", "statistics", "machine learning", "sql"],
+        "preferred": ["pandas", "numpy", "scikit-learn", "tensorflow", "pytorch", "r"],
+        "bonus": ["spark", "hadoop", "aws", "azure", "docker"],
+        "min_experience": 2
+    },
+    "Frontend Developer": {
+        "must_have": ["javascript", "html", "css", "react"],
+        "preferred": ["typescript", "vue", "angular", "webpack", "git"],
+        "bonus": ["nextjs", "redux", "testing", "accessibility"],
+        "min_experience": 1
+    },
+    "Backend Developer": {
+        "must_have": ["python", "sql", "api", "database"],
+        "preferred": ["node.js", "django", "flask", "postgresql", "mongodb"],
+        "bonus": ["microservices", "docker", "kubernetes", "redis"],
+        "min_experience": 2
+    },
+    "ML Engineer": {
+        "must_have": ["python", "machine learning", "docker"],
+        "preferred": ["tensorflow", "pytorch", "mlops", "kubernetes"],
+        "bonus": ["aws", "azure", "monitoring", "ci/cd"],
+        "min_experience": 2
+    },
+    "DevOps Engineer": {
+        "must_have": ["linux", "docker", "ci/cd"],
+        "preferred": ["kubernetes", "aws", "azure", "terraform", "ansible"],
+        "bonus": ["monitoring", "prometheus", "grafana"],
+        "min_experience": 2
+    },
+    "Full Stack Developer": {
+        "must_have": ["javascript", "python", "sql", "react"],
+        "preferred": ["node.js", "typescript", "mongodb", "postgresql"],
+        "bonus": ["aws", "docker", "testing"],
+        "min_experience": 2
+    },
+    "Mobile Developer (iOS/Android)": {
+        "must_have": ["swift", "kotlin", "mobile"],
+        "preferred": ["react native", "flutter", "ios", "android"],
+        "bonus": ["firebase", "app store", "play store"],
+        "min_experience": 1
+    },
+    "Cloud Engineer (AWS/Azure/GCP)": {
+        "must_have": ["aws", "cloud", "linux"],
+        "preferred": ["azure", "gcp", "terraform", "kubernetes"],
+        "bonus": ["lambda", "s3", "ec2", "monitoring"],
+        "min_experience": 2
+    },
+}
+
+# Common skill synonyms/aliases (helps realism)
+_SKILL_ALIASES = {
+    "machine learning": ["ml", "machine-learning"],
+    "scikit-learn": ["sklearn", "scikit learn"],
+    "node.js": ["node", "nodejs"],
+    "ci/cd": ["cicd", "ci cd", "continuous integration", "continuous delivery"],
+    "kubernetes": ["k8s"],
+    "amazon web services": ["aws"],
+    "postgresql": ["postgres", "postgre"],
+    "react native": ["react-native"],
+    "tensorflow": ["tf"],
+    "pytorch": ["torch"],
+}
+
+def _normalize_text(s: str) -> str:
+    s = (s or "").lower()
+    s = s.replace("&", " and ")
+    s = re.sub(r"[^a-z0-9\.\+\-\s/]", " ", s)  # keep . + - / for things like node.js, ci/cd
+    s = re.sub(r"\s+", " ", s).strip()
+    return f" {s} "  # pad for safer "in" checks
+
+def _skill_present(text: str, skill: str) -> bool:
+    """Checks if a skill or any of its aliases appear in normalized text."""
+    skill_n = _normalize_text(skill).strip()
+    if f" {skill_n} " in text:
+        return True
+    for alias in _SKILL_ALIASES.get(skill_n, []):
+        alias_n = _normalize_text(alias).strip()
+        if f" {alias_n} " in text:
+            return True
+    return False
+
+def calculate_resume_score(resume_text: str, skills: dict, experience: int, job_role: str) -> int:
+    """
+    Role-aware resume scoring.
+    Uses extracted skills + experience.
+    Output range: 18-92 (more realistic than 0-100).
+    Deterministic for same (skills, exp, role).
+    """
+
+    requirements = ROLE_REQUIRED_SKILLS.get(job_role, {
+        "must_have": ["programming"],
+        "preferred": [],
+        "bonus": [],
+        "min_experience": 1
+    })
+
+    # Flatten extracted skills safely
+    all_resume_skills = []
+    if isinstance(skills, dict):
+        for _, skill_list in skills.items():
+            if isinstance(skill_list, list):
+                all_resume_skills.extend([str(s) for s in skill_list if s])
+
+    # Build normalized search text from extracted skill list
+    resume_text = _normalize_text(resume_text)
+
+    # If resume had almost no detected skills, keep it low but not zero
+    detected_skill_count = len(all_resume_skills)
+
+    # -----------------------------
+    # Scoring components (0..100-ish internal, then clamp)
+    # -----------------------------
+    score = 0
+
+    # A) Must-have skills (max 44)
+    # Strong penalty for missing must-haves
+    must_have = requirements["must_have"]
+    must_found = 0
+    for sk in must_have:
+        if _skill_present(resume_text, sk):
+            must_found += 1
+
+    if len(must_have) > 0:
+        must_ratio = must_found / len(must_have)
+    else:
+        must_ratio = 0.0
+
+    # Base must score
+    must_score = int(44 * must_ratio)
+
+    # Extra penalty if many missing
+    missing = len(must_have) - must_found
+    must_score -= missing * 6  # -6 per missing must-have
+    must_score = max(0, must_score)
+    score += must_score
+
+    # B) Preferred skills (max 28)
+    preferred = requirements["preferred"]
+    pref_found = 0
+    for sk in preferred:
+        if _skill_present(resume_text, sk):
+            pref_found += 1
+    # up to 28 points
+    pref_score = min(28, pref_found * 4)
+    score += pref_score
+
+    # C) Bonus skills (max 10)
+    bonus = requirements["bonus"]
+    bonus_found = 0
+    for sk in bonus:
+        if _skill_present(resume_text, sk):
+            bonus_found += 1
+    bonus_score = min(10, bonus_found * 2)
+    score += bonus_score
+
+    # D) Experience (max 18)
+    exp = max(0, int(experience or 0))
+    min_exp = int(requirements.get("min_experience", 1))
+
+    if exp >= min_exp + 4:
+        exp_score = 18
+    elif exp >= min_exp + 2:
+        exp_score = 15
+    elif exp >= min_exp:
+        exp_score = 12
+    elif exp == max(min_exp - 1, 0):
+        exp_score = 9
+    else:
+        exp_score = 6
+    score += exp_score
+
+    # E) “Completeness” nudge (0..6)
+    # Prevents all roles always getting 55% when resume has many skills
+    if detected_skill_count >= 12:
+        score += 6
+    elif detected_skill_count >= 8:
+        score += 4
+    elif detected_skill_count >= 4:
+        score += 2
+    else:
+        score += 0
+
+    # F) Small deterministic jitter (-2..+2) so scores don't look "robotic"
+    # but still deterministic per resume+role+exp.
+    seed_str = f"{job_role}|{exp}|{'|'.join(sorted([s.lower() for s in all_resume_skills]))}"
+    h = hashlib.md5(seed_str.encode("utf-8")).hexdigest()
+    jitter = (int(h[:2], 16) % 5) - 2  # -2..+2
+    score += jitter
+
+    # -----------------------------
+    # Final clamp (realistic range)
+    # -----------------------------
+    final_score = max(18, min(92, score))
+    return int(final_score)
 # ═══════════════════════════════════════════════════════════
 # SESSION STATE
 # ═══════════════════════════════════════════════════════════
@@ -476,17 +676,73 @@ else:
 if page == "🏠 Home":
     st.markdown("<h1 class='main-header'>🎤 AI-Powered Interview Preparation System</h1>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("<div class='feature-box'><h3>💾 SQLite Memory</h3><p>Persistent conversation history</p></div>", unsafe_allow_html=True)
-    with col2:
-        st.markdown("<div class='feature-box'><h3>🎯 Adaptive AI</h3><p>Questions based on context</p></div>", unsafe_allow_html=True)
-    with col3:
-        st.markdown("<div class='feature-box'><h3>📊 5-Factor Rubric</h3><p>Detailed scoring breakdown</p></div>", unsafe_allow_html=True)
+    # ✅ IMPROVED FEATURE CARDS (GOAL 1)
+    st.markdown("""
+    <style>
+    .feature-card {
+        background: linear-gradient(145deg, #1e293b 0%, #334155 100%);
+        border-radius: 16px;
+        padding: 32px 24px;
+        text-align: center;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        transition: all 0.3s ease;
+        height: 200px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        cursor: default;
+        pointer-events: none;
+    }
+    .feature-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 32px rgba(96, 165, 250, 0.2);
+    }
+    .feature-card h3 {
+        color: #60a5fa !important;
+        font-size: 1.5rem !important;
+        margin-bottom: 12px !important;
+        font-weight: 600 !important;
+    }
+    .feature-card p {
+        color: #cbd5e1;
+        font-size: 1rem;
+        line-height: 1.6;
+        margin: 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Show stats from database
+    col1, col2, col3 = st.columns(3, gap="large")
+    
+    with col1:
+        st.markdown("""
+        <div class='feature-card'>
+            <h3>💾 SQLite Memory</h3>
+            <p>Persistent conversation history across all sessions</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class='feature-card'>
+            <h3>🎯 Adaptive AI</h3>
+            <p>Questions personalized to your background</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class='feature-card'>
+            <h3>📊 5-Factor Rubric</h3>
+            <p>Detailed scoring across multiple dimensions</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Show stats from database (keep existing code)
     sessions = load_session_history()
     if sessions:
+        st.markdown("---")
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Sessions", len(sessions))
         if len(sessions) > 0:
@@ -505,7 +761,7 @@ elif page == "📄 Resume":
             text, skills, exp = parse_resume(uploaded)
             st.session_state.resume_skills = skills
             st.session_state.resume_experience = exp
-            st.session_state.resume_score = calculate_resume_score(skills, exp, job_role)
+            st.session_state.resume_score = calculate_resume_score(text,skills, exp, job_role)
             st.balloons()
             st.rerun()
     
@@ -516,21 +772,66 @@ elif page == "📄 Resume":
 elif page == "🎤 Interview":
     st.title("🎤 Professional Interview")
     
+    # ✅ ADD RESTART BUTTON (GOAL 3)
+    if st.session_state.interview_stage != 'not_started':
+        col_restart, col_spacer = st.columns([1, 5])
+        with col_restart:
+            if st.button("🔄 Restart", width=True):
+                st.session_state.interview_stage = 'not_started'
+                st.session_state.question_num = 0
+                st.session_state.answers = []
+                st.session_state.scores = []
+                st.session_state.rubric_scores = []
+                st.session_state.technical_questions = []
+                st.session_state.intro_questions = []
+                st.session_state.conversation_history = []
+                st.session_state.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                st.rerun()
+    
+    # ✅ IMPROVED QUESTION CARD CSS (GOAL 3)
+    st.markdown("""
+    <style>
+    .question-card {
+        background: linear-gradient(145deg, #1e293b 0%, #334155 100%);
+        border-radius: 12px;
+        padding: 28px;
+        margin: 20px 0;
+        border-left: 5px solid #3b82f6;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+    .question-card h3 {
+        color: #f1f5f9 !important;
+        font-size: 1.3rem !important;
+        line-height: 1.6 !important;
+        margin-bottom: 16px !important;
+        font-weight: 500 !important;
+    }
+    .question-card p {
+        color: #94a3b8;
+        font-size: 0.95rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         st.markdown(f"### 🎯 {job_role}")
     with col2:
-        elapsed = (datetime.now() - st.session_state.start_time).seconds
-        st.markdown(f"### ⏱️ {elapsed//60:02d}:{elapsed%60:02d}")
+        # ✅ FIXED TIMER (GOAL 3)
+        if st.session_state.interview_stage != 'not_started':
+            elapsed = (datetime.now() - st.session_state.start_time).seconds
+            st.markdown(f"### ⏱️ {elapsed//60:02d}:{elapsed%60:02d}")
+        else:
+            st.markdown(f"### ⏱️ --:--")
     with col3:
-        if st.session_state.question_start_time:
+        if st.session_state.question_start_time and st.session_state.interview_stage != 'not_started':
             st.markdown(f"### 🕐 {(datetime.now() - st.session_state.question_start_time).seconds}s")
     
     st.markdown("---")
     
-    # 3D AVATAR
+    # 3D AVATAR (keep existing iframe)
     st.subheader("🤖 AI Interviewer")
-    st.components.v1.iframe("https://interview-prep-system.vercel.app/", height=600, scrolling=False)
+    st.components.v1.iframe(FRONTEND_URL, height=600, scrolling=False)
     
     st.markdown("---")
     
@@ -540,7 +841,7 @@ elif page == "🎤 Interview":
         <p><strong>Round 2:</strong> Technical (5 adaptive questions)</p>
         <p><strong>Memory:</strong> Stored in SQLite for learning</p></div>""", unsafe_allow_html=True)
         
-        if st.button("🚀 START", use_container_width=True, type="primary"):
+        if st.button("🚀 START", width=True, type="primary"):
             st.session_state.interview_stage = 'intro'
             st.session_state.question_num = 1
             st.session_state.start_time = datetime.now()
@@ -556,11 +857,15 @@ elif page == "🎤 Interview":
             q = intro_qs[st.session_state.question_num - 1]
             
             st.subheader(f"Introduction - Q{st.session_state.question_num}/{len(intro_qs)}")
-            st.markdown(f"""<div class='feature-box'><h3>{q['question']}</h3></div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+    <div class='question-card'>
+        <h3>{q['question']}</h3>
+    </div>
+    """, unsafe_allow_html=True)
             
             answer = st.text_area("Your Answer:", height=120, key=f"intro_{st.session_state.question_num}")
             
-            if st.button("📤 Submit", use_container_width=True, type="primary"):
+            if st.button("📤 Submit", width=True, type="primary"):
                 if answer and len(answer.strip()) > 10:
                     answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
                     
@@ -597,14 +902,18 @@ elif page == "🎤 Interview":
             q = questions[st.session_state.question_num - 1]
             
             st.subheader(f"Technical - Q{st.session_state.question_num}/{len(questions)}")
-            st.markdown(f"""<div class='feature-box'><h3>{q['question']}</h3>
-            <p><strong>Type:</strong> {q.get('type', 'conceptual').title()}</p></div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+    <div class='question-card'>
+        <h3>{q['question']}</h3>
+        <p><strong>Type:</strong> {q.get('type', 'conceptual').title()}</p>
+    </div>
+    """, unsafe_allow_html=True)
             
             answer = st.text_area("Your Answer:", height=150, key=f"tech_{st.session_state.question_num}")
             
             col1, col2 = st.columns([3, 1])
             with col1:
-                if st.button("📤 Submit", use_container_width=True, type="primary"):
+                if st.button("📤 Submit", width=True, type="primary"):
                     if answer and len(answer.strip()) > 15:
                         answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
                         
@@ -666,6 +975,23 @@ elif page == "🎤 Interview":
         st.success("🎉 Interview Complete!")
         st.info("📊 Check Results for detailed feedback")
 
+
+elif page == "🎙️ Voice Interview":
+    st.title("🎙️ Voice-Based Interview Mode")
+    st.info("💡 This feature uses the FastAPI voice server. Make sure it's running on port 8000!")
+
+    voice_url = f"{FRONTEND_URL}/voice"
+    st.components.v1.html(f"""
+    <iframe 
+        src="{voice_url}" 
+        width="100%" 
+        height="900" 
+        frameborder="0"
+        allow="microphone"
+        style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);"
+    ></iframe>
+    """, height=900)
+
 elif page == "📊 Results":
     st.title("📊 Performance Report")
     
@@ -710,53 +1036,95 @@ elif page == "📊 Results":
                         st.markdown(f"• {task}")
 
 elif page == "📈 Progress":
-    st.title("📈 Progress Tracking")
+    st.title("📈 Performance Dashboard")
     
     sessions = load_session_history()
-    if sessions:
-        df = pd.DataFrame(sessions, columns=['ID', 'Role', 'Difficulty', 'Score', 'Date'])
-        st.line_chart(df.set_index('Date')['Score'])
-        st.dataframe(df[['Role', 'Difficulty', 'Score', 'Date']])
+    
+    if not sessions:
+        st.info("💡 Complete interviews to track your progress!")
     else:
-        st.info("Complete interviews to track progress!")
+        # Prepare data
+        df = pd.DataFrame(sessions, columns=['ID', 'Role', 'Difficulty', 'Score', 'Date'])
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.sort_values('Date')
+        
+        # ═══ KPI CARDS ═══
+        st.subheader("📊 Key Performance Indicators")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("Total Sessions", len(sessions))
+        
+        with col2:
+            last_score = df['Score'].iloc[-1]
+            st.metric("Latest Score", f"{last_score:.0f}%")
+        
+        with col3:
+            avg_score = df['Score'].mean()
+            st.metric("Average Score", f"{avg_score:.0f}%")
+        
+        with col4:
+            best_score = df['Score'].max()
+            st.metric("Best Score", f"{best_score:.0f}%")
+        
+        with col5:
+            if len(df) > 1:
+                improvement = df['Score'].iloc[-1] - df['Score'].iloc[0]
+                st.metric("Improvement", f"{improvement:+.0f}%", delta=f"{improvement:+.0f}%")
+            else:
+                st.metric("Improvement", "N/A")
+        
+        st.markdown("---")
+        
+        # ═══ SCORE TREND ═══
+        st.subheader("📈 Score Trend Over Time")
+        chart_df = df[['Date', 'Score']].copy()
+        chart_df = chart_df.set_index('Date')
+        st.line_chart(chart_df, width=True, height=300)
+        
+        st.markdown("---")
+        
+        # ═══ CATEGORY PERFORMANCE ═══
+        st.subheader("📊 Performance by Category")
+        
+        conn = sqlite3.connect('interview_memory.db')
+        c = conn.cursor()
+        c.execute('''SELECT rubric_scores FROM performance''')
+        all_rubrics = c.fetchall()
+        conn.close()
+        
+        if all_rubrics:
+            category_totals = {"Correctness": 0, "Depth": 0, "Clarity": 0, "Structure": 0, "Real-world": 0}
+            count = 0
+            
+            for rubric_json, in all_rubrics:
+                try:
+                    rubric = json.loads(rubric_json)
+                    category_totals["Correctness"] += rubric.get("correctness", 0)
+                    category_totals["Depth"] += rubric.get("depth", 0)
+                    category_totals["Clarity"] += rubric.get("clarity", 0)
+                    category_totals["Structure"] += rubric.get("structure", 0)
+                    category_totals["Real-world"] += rubric.get("real_world", 0)
+                    count += 1
+                except:
+                    pass
+            
+            if count > 0:
+                category_avgs = {k: v / count for k, v in category_totals.items()}
+                category_df = pd.DataFrame(list(category_avgs.items()), columns=['Category', 'Score'])
+                st.bar_chart(category_df.set_index('Category'), width=True, height=300)
+        
+        st.markdown("---")
+        
+        # ═══ SESSION HISTORY TABLE ═══
+        st.subheader("📋 Session History")
+        
+        display_df = df[['Date', 'Role', 'Difficulty', 'Score']].copy()
+        display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
+        display_df['Score'] = display_df['Score'].apply(lambda x: f"{x:.0f}%")
+        
+        st.dataframe(display_df, width=True, hide_index=True)
 
-# Add this BEFORE the final st.markdown line at the bottom
 
-elif page == "🎙️ Voice Interview":  # NEW PAGE
-    st.title("🎙️ Voice-Based Interview Mode")
-    
-    st.info("💡 This feature uses the FastAPI voice server. Make sure it's running on port 8000!")
-    
-    # Show instructions
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### ✅ Requirements")
-        st.markdown("""
-        - FastAPI server running: `uvicorn api_extensions:app --port 8000`
-        - Microphone permission in browser
-        - Chrome/Edge browser (Safari has limited support)
-        """)
-    
-    with col2:
-        st.markdown("### 🎯 Features")
-        st.markdown("""
-        - Real-time voice recognition
-        - Live filler word detection
-        - STAR method analysis
-        - Speaking pace feedback
-        """)
-    
-    st.markdown("---")
-    
-    # Embed voice interview (adjust port if needed)
-    st.components.v1.html("""
-    <iframe 
-        src="{FRONTEND_URL}/voice" 
-        width="100%" 
-        height="900" 
-        frameborder="0"
-        allow="microphone"
-        style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);"
-    ></iframe>
-    """, height=900)
 st.markdown("<div style='text-align:center;color:#888'><p>AI Interview Prep | SQLite Memory | Premium Features</p></div>", unsafe_allow_html=True)

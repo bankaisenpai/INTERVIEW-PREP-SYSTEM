@@ -410,6 +410,23 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef(null);
 
+
+   useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data && event.data.type === 'SET_TALKING') {
+        console.log('📨 Received talking state from Streamlit:', event.data.value);
+        setIsTalking(event.data.value);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
+
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen();
