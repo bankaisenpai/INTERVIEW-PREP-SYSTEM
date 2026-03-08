@@ -17,7 +17,7 @@ st.set_page_config(page_title="AI Interview Prep", page_icon="🎤", layout="wid
 
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173") 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 # ═══════════════════════════════════════════════════════════
 # SQLITE DATABASE FOR PERSISTENT MEMORY
@@ -27,7 +27,6 @@ def init_database():
     conn = sqlite3.connect('interview_memory.db')
     c = conn.cursor()
     
-    # Table for conversation history
     c.execute('''CREATE TABLE IF NOT EXISTS conversations
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   session_id TEXT,
@@ -36,7 +35,6 @@ def init_database():
                   answer TEXT,
                   category TEXT)''')
     
-    # Table for session history
     c.execute('''CREATE TABLE IF NOT EXISTS sessions
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   session_id TEXT UNIQUE,
@@ -46,7 +44,6 @@ def init_database():
                   overall_score REAL,
                   completed_at DATETIME)''')
     
-    # Table for performance tracking
     c.execute('''CREATE TABLE IF NOT EXISTS performance
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   session_id TEXT,
@@ -60,11 +57,9 @@ def init_database():
     conn.commit()
     conn.close()
 
-# Initialize on startup
 init_database()
 
 def save_conversation(session_id, question, answer, category):
-    """Save conversation to database"""
     conn = sqlite3.connect('interview_memory.db')
     c = conn.cursor()
     c.execute('''INSERT INTO conversations (session_id, timestamp, question, answer, category)
@@ -74,7 +69,6 @@ def save_conversation(session_id, question, answer, category):
     conn.close()
 
 def save_session(session_id, job_role, difficulty, mode, overall_score):
-    """Save completed session"""
     conn = sqlite3.connect('interview_memory.db')
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO sessions 
@@ -85,7 +79,6 @@ def save_session(session_id, job_role, difficulty, mode, overall_score):
     conn.close()
 
 def save_performance(session_id, question, answer, score, rubric_scores, feedback, time_taken):
-    """Save individual question performance"""
     conn = sqlite3.connect('interview_memory.db')
     c = conn.cursor()
     c.execute('''INSERT INTO performance 
@@ -96,7 +89,6 @@ def save_performance(session_id, question, answer, score, rubric_scores, feedbac
     conn.close()
 
 def load_session_history():
-    """Load all previous sessions"""
     conn = sqlite3.connect('interview_memory.db')
     c = conn.cursor()
     c.execute('''SELECT session_id, job_role, difficulty, overall_score, completed_at 
@@ -106,7 +98,6 @@ def load_session_history():
     return sessions
 
 def get_conversation_context(session_id, limit=5):
-    """Get recent conversation history"""
     conn = sqlite3.connect('interview_memory.db')
     c = conn.cursor()
     c.execute('''SELECT question, answer FROM conversations 
@@ -117,12 +108,181 @@ def get_conversation_context(session_id, limit=5):
     return [{"q": h[0], "a": h[1]} for h in reversed(history)]
 
 # ═══════════════════════════════════════════════════════════
-# GROQ AI WITH MEMORY
+# ROLE-BASED QUESTION BANK
+# ═══════════════════════════════════════════════════════════
+ROLE_QUESTION_BANK = {
+    "Backend Developer": {
+        "conceptual": [
+            {"question": "What is a REST API and how does it differ from GraphQL?", "category": "APIs", "keywords": ["REST", "API", "GraphQL", "endpoints"], "type": "conceptual"},
+            {"question": "Explain the difference between SQL and NoSQL databases. When would you use each?", "category": "Databases", "keywords": ["SQL", "NoSQL", "database", "schema"], "type": "conceptual"},
+            {"question": "What is JWT authentication and how does it work?", "category": "Authentication", "keywords": ["JWT", "token", "authentication", "security"], "type": "conceptual"},
+            {"question": "Explain database indexing and its impact on query performance.", "category": "Databases", "keywords": ["indexing", "performance", "query", "optimization"], "type": "conceptual"},
+            {"question": "What are microservices and how do they differ from monolithic architecture?", "category": "Architecture", "keywords": ["microservices", "architecture", "monolithic", "scalability"], "type": "conceptual"},
+        ],
+        "practical": [
+            {"question": "How would you design a caching strategy for a high-traffic API?", "category": "Performance", "keywords": ["caching", "API", "performance", "redis"], "type": "practical"},
+            {"question": "Walk me through how you would implement rate limiting for an API endpoint.", "category": "APIs", "keywords": ["rate limiting", "API", "throttling", "security"], "type": "practical"},
+            {"question": "How would you handle database migrations in a production environment?", "category": "Databases", "keywords": ["migration", "database", "production", "versioning"], "type": "practical"},
+            {"question": "Describe how you would implement user authentication and authorization in a web application.", "category": "Authentication", "keywords": ["authentication", "authorization", "security", "session"], "type": "practical"},
+            {"question": "How would you optimize a slow database query?", "category": "Databases", "keywords": ["optimization", "query", "performance", "indexing"], "type": "practical"},
+        ],
+        "debugging": [
+            {"question": "Your API is returning 500 errors intermittently. How would you debug this?", "category": "Debugging", "keywords": ["debugging", "error", "API", "logs"], "type": "debugging"},
+            {"question": "Database queries are suddenly very slow. What steps would you take to identify the issue?", "category": "Databases", "keywords": ["debugging", "performance", "database", "monitoring"], "type": "debugging"},
+            {"question": "Memory usage is spiking on your backend server. How do you investigate?", "category": "Performance", "keywords": ["memory", "debugging", "server", "profiling"], "type": "debugging"},
+        ],
+        "system_design": [
+            {"question": "Design a URL shortening service backend. What API endpoints and database schema would you use?", "category": "System Design", "keywords": ["system design", "scalability", "database", "API", "backend"], "type": "tradeoff"},
+            {"question": "How would you design a notification system backend that handles millions of users?", "category": "System Design", "keywords": ["system design", "scalability", "queue", "architecture", "backend"], "type": "tradeoff"},
+            {"question": "Explain the trade-offs between consistency and availability in distributed backend systems.", "category": "Architecture", "keywords": ["CAP theorem", "distributed", "consistency", "availability", "backend"], "type": "tradeoff"},
+        ]
+    },
+    
+    "Frontend Developer": {
+        "conceptual": [
+            {"question": "Explain how React's virtual DOM works and why it improves performance.", "category": "React", "keywords": ["virtual DOM", "React", "performance", "reconciliation"], "type": "conceptual"},
+            {"question": "What are React hooks and why were they introduced?", "category": "React", "keywords": ["hooks", "useState", "useEffect", "React"], "type": "conceptual"},
+            {"question": "Explain the difference between client-side and server-side rendering.", "category": "Performance", "keywords": ["CSR", "SSR", "rendering", "performance"], "type": "conceptual"},
+            {"question": "What is the event loop in JavaScript and how does it work?", "category": "JavaScript", "keywords": ["event loop", "async", "JavaScript", "callback"], "type": "conceptual"},
+            {"question": "Explain CSS specificity and how the cascade works.", "category": "CSS", "keywords": ["CSS", "specificity", "cascade", "selectors"], "type": "conceptual"},
+        ],
+        "practical": [
+            {"question": "How would you optimize a React application that is rendering slowly?", "category": "Performance", "keywords": ["optimization", "React", "performance", "memoization"], "type": "practical"},
+            {"question": "Describe how you would implement responsive design for a complex web application.", "category": "UI/UX", "keywords": ["responsive", "CSS", "mobile", "design"], "type": "practical"},
+            {"question": "How would you handle state management in a large React application?", "category": "React", "keywords": ["state", "Redux", "Context", "React"], "type": "practical"},
+            {"question": "Walk me through how you would implement infinite scrolling in a React app.", "category": "JavaScript", "keywords": ["infinite scroll", "pagination", "performance", "JavaScript"], "type": "practical"},
+            {"question": "How would you make a web application accessible to users with disabilities?", "category": "Accessibility", "keywords": ["accessibility", "ARIA", "WCAG", "a11y"], "type": "practical"},
+        ],
+        "debugging": [
+            {"question": "Your React component is re-rendering too frequently. How do you debug this?", "category": "React", "keywords": ["React", "re-render", "debugging", "performance"], "type": "debugging"},
+            {"question": "JavaScript code works in Chrome but fails in Safari. What's your debugging approach?", "category": "Debugging", "keywords": ["cross-browser", "debugging", "compatibility", "JavaScript"], "type": "debugging"},
+            {"question": "Users report the page is blank on load. How do you troubleshoot this frontend issue?", "category": "Debugging", "keywords": ["debugging", "error", "console", "JavaScript"], "type": "debugging"},
+        ],
+    },
+    
+    "Data Scientist": {
+        "ml_theory": [
+            {"question": "Explain the bias-variance tradeoff in machine learning.", "category": "ML Theory", "keywords": ["bias", "variance", "overfitting", "underfitting", "machine learning"], "type": "conceptual"},
+            {"question": "What is overfitting and how can you prevent it in machine learning models?", "category": "ML Theory", "keywords": ["overfitting", "regularization", "validation", "model"], "type": "conceptual"},
+            {"question": "Explain gradient descent and its variants (SGD, Adam, etc.).", "category": "ML Theory", "keywords": ["gradient descent", "optimization", "SGD", "Adam"], "type": "conceptual"},
+            {"question": "What is cross-validation and why is it important in data science?", "category": "ML Theory", "keywords": ["cross-validation", "k-fold", "validation", "model evaluation"], "type": "conceptual"},
+            {"question": "Explain the difference between supervised and unsupervised learning.", "category": "ML Theory", "keywords": ["supervised", "unsupervised", "learning", "classification"], "type": "conceptual"},
+        ],
+        "statistics": [
+            {"question": "What is p-value and how do you interpret it in statistical analysis?", "category": "Statistics", "keywords": ["p-value", "hypothesis testing", "statistics", "significance"], "type": "conceptual"},
+            {"question": "Explain the Central Limit Theorem and its importance in data science.", "category": "Statistics", "keywords": ["CLT", "distribution", "statistics", "sampling"], "type": "conceptual"},
+            {"question": "What is the difference between correlation and causation?", "category": "Statistics", "keywords": ["correlation", "causation", "statistics", "analysis"], "type": "conceptual"},
+        ],
+        "practical": [
+            {"question": "How would you handle imbalanced datasets in a classification problem?", "category": "Data Preprocessing", "keywords": ["imbalanced", "SMOTE", "sampling", "classification", "data"], "type": "practical"},
+            {"question": "Walk me through your approach to feature engineering for a new dataset.", "category": "Feature Engineering", "keywords": ["feature engineering", "preprocessing", "data", "model"], "type": "practical"},
+            {"question": "How do you evaluate the performance of a regression model?", "category": "Model Evaluation", "keywords": ["regression", "metrics", "RMSE", "R-squared"], "type": "practical"},
+            {"question": "Describe your process for selecting the best machine learning algorithm for a problem.", "category": "Model Selection", "keywords": ["algorithm selection", "model", "comparison", "metrics"], "type": "practical"},
+            {"question": "How would you handle missing data in a dataset?", "category": "Data Preprocessing", "keywords": ["missing data", "imputation", "preprocessing", "cleaning"], "type": "practical"},
+        ],
+    },
+    
+    "ML Engineer": {
+        "mlops": [
+            {"question": "How do you monitor machine learning models in production?", "category": "MLOps", "keywords": ["monitoring", "production", "drift", "metrics", "mlops"], "type": "practical"},
+            {"question": "Explain model versioning and why it's important in ML engineering.", "category": "MLOps", "keywords": ["versioning", "model", "deployment", "tracking"], "type": "conceptual"},
+            {"question": "How would you handle model drift in production ML systems?", "category": "MLOps", "keywords": ["model drift", "retraining", "monitoring", "production"], "type": "practical"},
+        ],
+        "deployment": [
+            {"question": "How would you deploy a machine learning model as a REST API?", "category": "Deployment", "keywords": ["deployment", "API", "REST", "serving", "model"], "type": "practical"},
+            {"question": "Explain the difference between batch and real-time inference in ML systems.", "category": "Deployment", "keywords": ["batch", "real-time", "inference", "prediction"], "type": "conceptual"},
+            {"question": "How do you optimize model inference time for production deployment?", "category": "Performance", "keywords": ["optimization", "inference", "latency", "performance"], "type": "practical"},
+        ],
+    },
+    
+    "Full Stack Developer": {
+        "frontend": [
+            {"question": "How would you optimize the initial page load time of a full-stack web application?", "category": "Performance", "keywords": ["optimization", "page load", "performance", "frontend"], "type": "practical"},
+            {"question": "Explain how you would implement authentication in a full-stack application.", "category": "Authentication", "keywords": ["authentication", "JWT", "session", "security", "fullstack"], "type": "practical"},
+        ],
+        "backend": [
+            {"question": "How do you design RESTful APIs for a full-stack application?", "category": "APIs", "keywords": ["REST", "API", "design", "endpoints", "backend"], "type": "practical"},
+            {"question": "Explain your approach to database schema design in full-stack development.", "category": "Databases", "keywords": ["database", "schema", "design", "normalization"], "type": "practical"},
+        ],
+    },
+    
+    "DevOps Engineer": {
+        "infrastructure": [
+            {"question": "Explain Infrastructure as Code and its benefits in DevOps.", "category": "IaC", "keywords": ["infrastructure", "terraform", "IaC", "automation", "devops"], "type": "conceptual"},
+            {"question": "How do you implement monitoring and alerting for production systems?", "category": "Monitoring", "keywords": ["monitoring", "alerting", "prometheus", "grafana"], "type": "practical"},
+        ],
+        "ci_cd": [
+            {"question": "How would you design a CI/CD pipeline for a microservices architecture?", "category": "CI/CD", "keywords": ["CI/CD", "pipeline", "microservices", "automation"], "type": "practical"},
+            {"question": "Explain the difference between blue-green and canary deployments.", "category": "Deployment", "keywords": ["blue-green", "canary", "deployment", "strategy"], "type": "conceptual"},
+        ],
+    }
+}
+
+ROLE_VALIDATION_KEYWORDS = {
+    "Backend Developer": [
+        "api", "rest", "graphql", "database", "sql", "nosql", "server", "backend",
+        "authentication", "authorization", "jwt", "microservices", "caching",
+        "redis", "endpoint", "route", "middleware", "orm", "migration"
+    ],
+    "Frontend Developer": [
+        "react", "vue", "angular", "javascript", "typescript", "html", "css",
+        "dom", "component", "hooks", "state", "props", "jsx", "frontend",
+        "ui", "ux", "responsive", "browser", "webpack", "bundler"
+    ],
+    "Data Scientist": [
+        "machine learning", "ml", "model", "algorithm", "data", "statistics",
+        "regression", "classification", "clustering", "training", "prediction",
+        "feature", "dataset", "pandas", "numpy", "scikit", "tensorflow"
+    ],
+    "ML Engineer": [
+        "mlops", "deployment", "production", "inference", "serving", "pipeline",
+        "docker", "kubernetes", "model", "monitoring", "drift", "retraining",
+        "api", "batch", "real-time", "optimization", "scaling"
+    ],
+    "Full Stack Developer": [
+        "frontend", "backend", "fullstack", "api", "database", "react", "node",
+        "express", "mongodb", "postgresql", "authentication", "deployment",
+        "integration", "rest", "websocket"
+    ],
+    "DevOps Engineer": [
+        "ci/cd", "jenkins", "gitlab", "docker", "kubernetes", "terraform",
+        "ansible", "monitoring", "prometheus", "grafana", "infrastructure",
+        "deployment", "automation", "cloud", "aws", "azure", "pipeline"
+    ]
+}
+
+def validate_question_relevance(question_text: str, job_role: str) -> bool:
+    """Check if a question is relevant to the given job role."""
+    keywords = ROLE_VALIDATION_KEYWORDS.get(job_role, [])
+    question_lower = question_text.lower()
+    
+    for keyword in keywords:
+        if keyword in question_lower:
+            return True
+    
+    return False
+
+def get_role_questions_by_category(job_role: str, num_questions: int = 5) -> list:
+    """Get diverse questions from the role-specific question bank."""
+    role_bank = ROLE_QUESTION_BANK.get(job_role, {})
+    
+    if not role_bank:
+        return []
+    
+    all_questions = []
+    for category_questions in role_bank.values():
+        all_questions.extend(category_questions)
+    
+    random.shuffle(all_questions)
+    
+    return all_questions[:num_questions * 2]  # Get extra for diversity
+
+# ═══════════════════════════════════════════════════════════
+# GROQ AI
 # ═══════════════════════════════════════════════════════════
 def call_groq_api(prompt, temperature=0.7, max_tokens=1500):
     if not GROQ_API_KEY:
         return None
-    
     try:
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -131,96 +291,77 @@ def call_groq_api(prompt, temperature=0.7, max_tokens=1500):
             "temperature": temperature,
             "max_tokens": max_tokens
         }
-        # ✅ BUG 1 FIXED: Was using FRONTEND_URL (Vercel) instead of Groq's actual API endpoint
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=20
-        )
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                                headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         return None
-    except Exception as e:
+    except:
         return None
 
 def generate_personalized_questions(job_role, difficulty, resume_skills, conversation_history, num_questions=5):
-    """Generate questions with conversation memory"""
+    """
+    Generate role-specific interview questions with strict validation.
+    Questions are pulled from a curated role-based question bank.
+    """
     
-    random_seed = random.randint(1, 1000)
+    # Get base questions from role-specific bank
+    base_questions = get_role_questions_by_category(job_role, num_questions)
     
-    # Build conversation context
-    conv_context = ""
-    if conversation_history:
-        conv_context = "Previous conversation:\n"
-        for item in conversation_history[-3:]:
-            conv_context += f"Q: {item['q']}\nA: {item['a'][:200]}...\n"
+    if not base_questions:
+        # Fallback to default questions if role not found
+        return get_default_questions(job_role)
     
-    # Build resume context
-    resume_context = ""
-    if resume_skills:
-        all_skills = []
-        for cat, skills in resume_skills.items():
-            all_skills.extend(skills)
-        resume_context = f"Candidate has these skills: {', '.join(all_skills[:10])}\n"
+    # Validate all questions are role-relevant
+    validated_questions = []
     
-    job_contexts = {
-        "Data Scientist": "ML algorithms, statistics, Python/R, data preprocessing, model evaluation",
-        "Frontend Developer": "React/Vue/Angular, JavaScript/TypeScript, CSS, performance, accessibility",
-        "Backend Developer": "APIs, databases, architecture, authentication, caching, microservices",
-        "DevOps Engineer": "CI/CD, Docker, Kubernetes, AWS/Azure, monitoring, automation",
-        "ML Engineer": "Model deployment, MLOps, production ML, scalability, Docker/Kubernetes",
-        "Full Stack Developer": "Frontend + Backend, databases, REST APIs, deployment",
-        "Mobile Developer (iOS/Android)": "Swift/Kotlin, React Native/Flutter, mobile UI/UX, app deployment",
-        "Cloud Engineer (AWS/Azure/GCP)": "Cloud services, EC2, S3, Lambda, cloud architecture",
-        "QA Engineer": "Test automation, Selenium, testing frameworks, CI/CD integration",
-        "Cybersecurity Analyst": "Security threats, penetration testing, network security, encryption",
-        "Database Administrator": "SQL optimization, database design, backup/recovery, performance",
-        "UI/UX Designer": "User research, wireframing, prototyping, Figma/Sketch, design systems",
-    }
+    for q in base_questions:
+        if validate_question_relevance(q['question'], job_role):
+            validated_questions.append(q)
+            if len(validated_questions) >= num_questions:
+                break
     
-    context = job_contexts.get(job_role, "technical skills and problem-solving")
+    # Ensure we have enough questions
+    if len(validated_questions) < num_questions:
+        additional_needed = num_questions - len(validated_questions)
+        for q in base_questions:
+            if q not in validated_questions:
+                validated_questions.append(q)
+                if len(validated_questions) >= num_questions:
+                    break
     
-    prompt = f"""You are an expert technical interviewer for a {job_role} position.
-
-{resume_context}
-
-{conv_context}
-
-Generate {num_questions} UNIQUE interview questions:
-
-REQUIREMENTS:
-1. Questions MUST be specific to {job_role}: {context}
-2. Reference previous conversation if available
-3. Target skills from resume AND identify gaps
-4. Mix question types: conceptual, practical, debugging, tradeoff
-5. Difficulty: {difficulty}
-
-Seed: {random_seed}
-
-Return ONLY JSON array:
-[
-  {{"question": "...", "category": "...", "keywords": ["...", "...", "...", "...", "..."], "type": "conceptual|practical|debugging|tradeoff"}}
-]"""
-
-    response = call_groq_api(prompt, temperature=0.85, max_tokens=2000)
+    # Ensure diverse question types
+    by_type = {}
+    for q in validated_questions[:num_questions]:
+        q_type = q.get('type', 'conceptual')
+        if q_type not in by_type:
+            by_type[q_type] = []
+        by_type[q_type].append(q)
     
-    if response:
-        try:
-            import re
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                questions = json.loads(json_match.group())
-                if len(questions) >= num_questions:
-                    return questions[:num_questions]
-        except:
-            pass
+    # Build final list with diversity
+    final_questions = []
+    question_types = list(by_type.keys())
     
-    return get_default_questions(job_role)
+    while len(final_questions) < num_questions and by_type:
+        for q_type in question_types:
+            if q_type in by_type and by_type[q_type]:
+                final_questions.append(by_type[q_type].pop(0))
+                if not by_type[q_type]:
+                    del by_type[q_type]
+                if len(final_questions) >= num_questions:
+                    break
+    
+    # Fill remaining if needed
+    while len(final_questions) < num_questions and validated_questions:
+        for q in validated_questions:
+            if q not in final_questions:
+                final_questions.append(q)
+                if len(final_questions) >= num_questions:
+                    break
+    
+    return final_questions[:num_questions]
 
 def evaluate_with_rubric(question, answer, keywords, question_type="conceptual"):
-    """AI evaluation with detailed rubric"""
-    
     if not GROQ_API_KEY or not answer or len(answer.strip()) < 10:
         return keyword_rubric_evaluate(answer, keywords)
     
@@ -255,7 +396,6 @@ Return JSON:
     
     if response:
         try:
-            import re
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
@@ -265,7 +405,6 @@ Return JSON:
     return keyword_rubric_evaluate(answer, keywords)
 
 def keyword_rubric_evaluate(answer, keywords):
-    """Fallback rubric scoring"""
     if not answer or len(keywords) == 0:
         return {
             "total_score": 0,
@@ -299,49 +438,198 @@ def keyword_rubric_evaluate(answer, keywords):
     }
 
 def get_default_questions(job_role):
-    """Fallback questions"""
+    """Fallback questions if role not in bank."""
     defaults = {
-        "Data Scientist": [
-            {"question": "Explain bias-variance tradeoff in ML", "category": "ML Theory", "keywords": ["bias", "variance", "overfitting", "underfitting"], "type": "conceptual"},
-            {"question": "How do you handle imbalanced datasets?", "category": "Data", "keywords": ["imbalanced", "SMOTE", "oversampling"], "type": "practical"},
+        "Backend Developer": [
+            {"question": "Explain REST API design principles and best practices.", "category": "APIs", "keywords": ["REST", "API", "design", "backend"], "type": "conceptual"},
+            {"question": "How do you optimize database queries for better performance?", "category": "Databases", "keywords": ["database", "optimization", "query", "performance"], "type": "practical"},
+            {"question": "What is JWT authentication and when would you use it?", "category": "Authentication", "keywords": ["JWT", "authentication", "token", "security"], "type": "conceptual"},
+            {"question": "How would you design a caching strategy for an API?", "category": "Performance", "keywords": ["caching", "API", "performance", "redis"], "type": "practical"},
+            {"question": "Explain microservices architecture and its trade-offs.", "category": "Architecture", "keywords": ["microservices", "architecture", "backend", "scalability"], "type": "tradeoff"},
         ],
         "Frontend Developer": [
-            {"question": "Explain React hooks lifecycle", "category": "React", "keywords": ["hooks", "useState", "useEffect", "lifecycle"], "type": "conceptual"},
-            {"question": "How do you optimize React performance?", "category": "Performance", "keywords": ["memoization", "lazy loading", "splitting"], "type": "practical"},
+            {"question": "Explain React component lifecycle and hooks.", "category": "React", "keywords": ["React", "lifecycle", "component", "hooks"], "type": "conceptual"},
+            {"question": "How do you optimize React application performance?", "category": "Performance", "keywords": ["React", "optimization", "performance", "frontend"], "type": "practical"},
+            {"question": "What is the virtual DOM and how does it work?", "category": "React", "keywords": ["virtual DOM", "React", "rendering", "performance"], "type": "conceptual"},
+            {"question": "How would you implement responsive design?", "category": "CSS", "keywords": ["responsive", "CSS", "mobile", "design"], "type": "practical"},
+            {"question": "Explain state management in React applications.", "category": "React", "keywords": ["state", "React", "Redux", "Context"], "type": "tradeoff"},
         ],
+        "Data Scientist": [
+            {"question": "Explain the bias-variance tradeoff in machine learning.", "category": "ML Theory", "keywords": ["bias", "variance", "overfitting", "machine learning"], "type": "conceptual"},
+            {"question": "How do you handle imbalanced datasets?", "category": "Data", "keywords": ["imbalanced", "sampling", "data", "classification"], "type": "practical"},
+            {"question": "What is cross-validation and why is it important?", "category": "ML Theory", "keywords": ["cross-validation", "validation", "model", "evaluation"], "type": "conceptual"},
+            {"question": "How do you select features for a machine learning model?", "category": "Feature Engineering", "keywords": ["feature selection", "engineering", "model", "data"], "type": "practical"},
+            {"question": "Compare Random Forest and Gradient Boosting algorithms.", "category": "Algorithms", "keywords": ["Random Forest", "Gradient Boosting", "ensemble", "comparison"], "type": "tradeoff"},
+        ],
+        "ML Engineer": [
+            {"question": "How do you deploy a machine learning model to production?", "category": "Deployment", "keywords": ["deployment", "production", "model", "mlops"], "type": "practical"},
+            {"question": "Explain model monitoring and drift detection.", "category": "MLOps", "keywords": ["monitoring", "drift", "production", "model"], "type": "conceptual"},
+            {"question": "How would you optimize model inference time?", "category": "Performance", "keywords": ["optimization", "inference", "performance", "model"], "type": "practical"},
+        ],
+        "Full Stack Developer": [
+            {"question": "How do you design a full-stack application architecture?", "category": "Architecture", "keywords": ["architecture", "fullstack", "design", "scalability"], "type": "practical"},
+            {"question": "Explain authentication flow in a full-stack app.", "category": "Authentication", "keywords": ["authentication", "security", "fullstack", "JWT"], "type": "conceptual"},
+        ],
+        "DevOps Engineer": [
+            {"question": "How do you set up a CI/CD pipeline?", "category": "CI/CD", "keywords": ["CI/CD", "pipeline", "automation", "deployment"], "type": "practical"},
+            {"question": "Explain Infrastructure as Code with Terraform.", "category": "IaC", "keywords": ["terraform", "IaC", "infrastructure", "automation"], "type": "conceptual"},
+        ]
     }
-    return defaults.get(job_role, defaults["Data Scientist"])
-
-def generate_improvement_plan(scores, job_role):
-    """Generate 7-day plan"""
-    if not GROQ_API_KEY:
-        return [{"day": i+1, "focus": f"Day {i+1}: Practice", "tasks": ["Review concepts"], "resources": ["Online"]} for i in range(7)]
     
-    prompt = f"""Create a 7-day improvement plan for {job_role} based on:
-{json.dumps(scores, indent=2)}
+    return defaults.get(job_role, defaults.get("Backend Developer", []))
 
-Return JSON array:
-[{{"day": 1, "focus": "topic", "tasks": ["task1", "task2"], "resources": ["resource1"]}}]"""
-
-    response = call_groq_api(prompt, temperature=0.7, max_tokens=1000)
+def generate_improvement_plan(session_id, job_role):
+    """Generate structured 7-day plan from actual performance data"""
     
-    if response:
+    conn = sqlite3.connect('interview_memory.db')
+    c = conn.cursor()
+    c.execute('''SELECT rubric_scores FROM performance WHERE session_id = ?''', (session_id,))
+    rubric_data = c.fetchall()
+    conn.close()
+    
+    if not rubric_data:
+        return None
+    
+    rubric_totals = {"correctness": 0, "depth": 0, "clarity": 0, "structure": 0, "real_world": 0}
+    count = len(rubric_data)
+    
+    for rubric_json, in rubric_data:
         try:
-            import re
-            json_match = re.search(r'\[.*\]', response, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
+            rubric = json.loads(rubric_json)
+            for key in rubric_totals.keys():
+                rubric_totals[key] += rubric.get(key, 0)
         except:
             pass
     
-    return [{"day": i+1, "focus": f"Day {i+1}", "tasks": ["Practice"], "resources": ["Online"]} for i in range(7)]
+    rubric_avgs = {
+        "correctness": rubric_totals["correctness"] / (count * 40),
+        "depth": rubric_totals["depth"] / (count * 25),
+        "clarity": rubric_totals["clarity"] / (count * 15),
+        "structure": rubric_totals["structure"] / (count * 10),
+        "real_world": rubric_totals["real_world"] / (count * 10)
+    }
+    
+    sorted_rubrics = sorted(rubric_avgs.items(), key=lambda x: x[1])
+    weakest = sorted_rubrics[0][0]
+    
+    plans = {
+        "correctness": {
+            "Data Scientist": [
+                {"day": 1, "focus": "Core ML Concepts", "tasks": ["Review bias-variance tradeoff", "Study overfitting vs underfitting", "Practice explaining algorithms"], "resources": ["StatQuest YouTube", "Hands-On ML book"]},
+                {"day": 2, "focus": "Algorithm Deep Dive", "tasks": ["Compare supervised vs unsupervised learning", "Explain 3 algorithms in detail", "Create comparison chart"], "resources": ["Scikit-learn docs", "ML Mastery"]},
+                {"day": 3, "focus": "Model Evaluation", "tasks": ["Practice metrics (precision, recall, F1)", "Explain ROC curves", "Calculate metrics by hand"], "resources": ["Kaggle Learn", "Analytics Vidhya"]},
+                {"day": 4, "focus": "Feature Engineering", "tasks": ["Study feature selection methods", "Practice encoding techniques", "Review dimensionality reduction"], "resources": ["Feature Engineering book", "Towards Data Science"]},
+                {"day": 5, "focus": "Mock Interview Day", "tasks": ["Record yourself answering 5 questions", "Review and self-critique", "Identify gaps"], "resources": ["Pramp", "Interviewing.io"]},
+                {"day": 6, "focus": "Edge Cases & Trade-offs", "tasks": ["Study when algorithms fail", "Compare time/space complexity", "Practice explaining trade-offs"], "resources": ["Big-O Cheat Sheet", "AlgoExpert"]},
+                {"day": 7, "focus": "Final Review", "tasks": ["Retake interview on this platform", "Compare before/after scores", "Note improvements"], "resources": ["This platform"]}
+            ],
+            "Frontend Developer": [
+                {"day": 1, "focus": "React Fundamentals", "tasks": ["Review component lifecycle", "Study hooks in depth", "Practice useState/useEffect"], "resources": ["React docs", "React Tutorial"]},
+                {"day": 2, "focus": "State Management", "tasks": ["Compare Redux vs Context API", "Build mini app with state", "Explain data flow"], "resources": ["Redux docs", "egghead.io"]},
+                {"day": 3, "focus": "Performance", "tasks": ["Study React.memo and useMemo", "Learn code splitting", "Practice lazy loading"], "resources": ["web.dev", "React Performance"]},
+                {"day": 4, "focus": "Modern JS/TS", "tasks": ["Review ES6+ features", "Practice async/await", "Study TypeScript basics"], "resources": ["MDN Web Docs", "TypeScript Handbook"]},
+                {"day": 5, "focus": "Mock Interview", "tasks": ["Record 5 technical answers", "Review code examples", "Practice live coding"], "resources": ["LeetCode Frontend", "CodeSandbox"]},
+                {"day": 6, "focus": "Browser APIs", "tasks": ["Study DOM manipulation", "Review event handling", "Practice fetch/axios"], "resources": ["JavaScript.info", "MDN"]},
+                {"day": 7, "focus": "Final Practice", "tasks": ["Retake interview", "Build small project", "Review mistakes"], "resources": ["This platform", "Frontend Mentor"]}
+            ]
+        },
+        "depth": {
+            "Data Scientist": [
+                {"day": 1, "focus": "Adding Real Examples", "tasks": ["For each concept, find 2 real-world use cases", "Create example library", "Practice explaining with examples"], "resources": ["Kaggle case studies", "Papers with Code"]},
+                {"day": 2, "focus": "Industry Applications", "tasks": ["Study how Netflix uses ML", "Review Uber's ML platform", "Find 3 case studies"], "resources": ["Tech blogs", "Medium Engineering"]},
+                {"day": 3, "focus": "Edge Cases", "tasks": ["Identify when algorithms fail", "Study common pitfalls", "Practice troubleshooting"], "resources": ["Stack Overflow", "Cross Validated"]},
+                {"day": 4, "focus": "Deep Technical Dive", "tasks": ["Pick 1 algorithm, study math", "Implement from scratch", "Explain every step"], "resources": ["Andrew Ng course", "3Blue1Brown"]},
+                {"day": 5, "focus": "Comparative Analysis", "tasks": ["Compare 3 similar algorithms", "List pros/cons", "Practice choosing best fit"], "resources": ["Scikit-learn comparison", "ML cheatsheet"]},
+                {"day": 6, "focus": "Production Insights", "tasks": ["Study MLOps practices", "Review model deployment", "Learn monitoring"], "resources": ["MLOps community", "Google MLOps"]},
+                {"day": 7, "focus": "Practice with Depth", "tasks": ["Retake interview", "Include 2+ examples per answer", "Explain trade-offs"], "resources": ["This platform"]}
+            ],
+            "Frontend Developer": [
+                {"day": 1, "focus": "Real-World Examples", "tasks": ["For each React concept, find production examples", "Study popular apps' architecture", "Document patterns"], "resources": ["React Patterns", "GitHub repos"]},
+                {"day": 2, "focus": "Performance Deep Dive", "tasks": ["Study bundle size optimization", "Review render optimization", "Learn profiling"], "resources": ["Webpack Academy", "React DevTools"]},
+                {"day": 3, "focus": "Accessibility Details", "tasks": ["Study WCAG guidelines", "Practice keyboard navigation", "Review screen readers"], "resources": ["a11y project", "ARIA practices"]},
+                {"day": 4, "focus": "Browser Internals", "tasks": ["Study how rendering works", "Learn about reflows/repaints", "Review critical render path"], "resources": ["web.dev", "Browser rendering"]},
+                {"day": 5, "focus": "Framework Comparisons", "tasks": ["Compare React vs Vue vs Angular", "List trade-offs", "Practice explaining choices"], "resources": ["State of JS", "Framework docs"]},
+                {"day": 6, "focus": "Advanced Patterns", "tasks": ["Study HOCs vs Render Props vs Hooks", "Practice compound components", "Review design patterns"], "resources": ["Patterns.dev", "React patterns"]},
+                {"day": 7, "focus": "Detailed Practice", "tasks": ["Retake interview", "Add specific examples", "Explain implementation details"], "resources": ["This platform"]}
+            ]
+        },
+        "clarity": {
+            "Data Scientist": [
+                {"day": 1, "focus": "STAR Method", "tasks": ["Practice structuring answers: Situation, Task, Action, Result", "Record 3 answers", "Get feedback"], "resources": ["STAR method guide", "Mock Interview Practice"]},
+                {"day": 2, "focus": "Clear Explanations", "tasks": ["Explain complex topics to non-technical friend", "Use analogies", "Avoid jargon"], "resources": ["Explain Like I'm 5", "Communication skills"]},
+                {"day": 3, "focus": "Logical Flow", "tasks": ["Outline before answering", "Use transitions (First, Then, Finally)", "Practice sequencing"], "resources": ["Toastmasters", "Presentation skills"]},
+                {"day": 4, "focus": "Conciseness", "tasks": ["Answer in 2 minutes max", "Remove filler words", "Practice elevator pitches"], "resources": ["Public speaking tips", "Brevity guide"]},
+                {"day": 5, "focus": "Visual Thinking", "tasks": ["Draw diagrams while explaining", "Use whiteboard practice", "Create mental models"], "resources": ["System design", "Visual explanations"]},
+                {"day": 6, "focus": "Active Listening", "tasks": ["Rephrase questions before answering", "Ask clarifying questions", "Practice pausing"], "resources": ["Interview communication", "Active listening"]},
+                {"day": 7, "focus": "Structured Practice", "tasks": ["Retake interview", "Use clear structure in all answers", "Record and review"], "resources": ["This platform"]}
+            ],
+            "Frontend Developer": [
+                {"day": 1, "focus": "Code Walkthroughs", "tasks": ["Practice explaining code line-by-line", "Use clear variable names", "Add comments"], "resources": ["Clean Code book", "Code review best practices"]},
+                {"day": 2, "focus": "Technical Communication", "tasks": ["Explain async/await clearly", "Break down complex components", "Use diagrams"], "resources": ["Technical writing", "Developer communication"]},
+                {"day": 3, "focus": "Problem-Solving Narration", "tasks": ["Think aloud while coding", "Explain your thought process", "Practice debugging narratives"], "resources": ["Coding interview patterns", "Pramp"]},
+                {"day": 4, "focus": "Structured Answers", "tasks": ["Use frameworks: Problem → Approach → Solution", "Practice organized responses", "Eliminate rambling"], "resources": ["STAR method", "Interview prep"]},
+                {"day": 5, "focus": "Simplification", "tasks": ["Explain React to a beginner", "Remove unnecessary complexity", "Use simple words"], "resources": ["ELI5 programming", "Teaching resources"]},
+                {"day": 6, "focus": "Q&A Practice", "tasks": ["Practice answering unexpected questions", "Stay calm and organized", "Ask for clarification"], "resources": ["Mock interviews", "Interview.io"]},
+                {"day": 7, "focus": "Clear Communication", "tasks": ["Retake interview", "Focus on logical flow", "Review clarity"], "resources": ["This platform"]}
+            ]
+        }
+    }
+    
+    default_plan = plans.get(weakest, {}).get(job_role, None)
+    
+    if not default_plan:
+        return [
+            {"day": i+1, "focus": f"Improve {weakest.replace('_', ' ').title()}", 
+             "tasks": [f"Study {weakest} techniques", "Practice daily", "Review examples"], 
+             "resources": ["Online courses", "Technical blogs"]} 
+            for i in range(7)
+        ]
+    
+    return default_plan
 
-def get_intro_questions(job_role):
-    return [
-        {"question": f"Good morning! Welcome to our {job_role} interview. Please introduce yourself and tell me about your background.", "category": "Introduction", "keywords": ["name", "background"], "is_intro": True},
-        {"question": f"What specifically interests you about the {job_role} position?", "category": "Motivation", "keywords": ["interest", "motivation"], "is_intro": True},
-        {"question": "Walk me through a recent project you're proud of.", "category": "Project", "keywords": ["project", "achievement"], "is_intro": True}
-    ]
+def get_intro_questions(job_role, mode):
+    """
+    Generate introduction questions based on interview mode.
+    Practice Mode: 2 questions (lighter, friendlier)
+    Strict Interview: 3 questions (more formal, realistic)
+    """
+    
+    if mode == "Practice Mode":
+        return [
+            {
+                "question": f"Hi! Welcome to this practice interview for the {job_role} position. Let's start easy - tell me a bit about yourself and your background.",
+                "category": "Introduction",
+                "keywords": ["name", "background"],
+                "is_intro": True
+            },
+            {
+                "question": f"What interests you about working as a {job_role}?",
+                "category": "Motivation",
+                "keywords": ["interest", "passion"],
+                "is_intro": True
+            }
+        ]
+    else:  # Strict Interview
+        return [
+            {
+                "question": f"Good morning. Thank you for joining us today. Please introduce yourself and walk me through your professional background relevant to this {job_role} position.",
+                "category": "Introduction",
+                "keywords": ["name", "background", "experience"],
+                "is_intro": True
+            },
+            {
+                "question": f"What specifically attracted you to apply for this {job_role} role at our company?",
+                "category": "Motivation",
+                "keywords": ["interest", "motivation", "company"],
+                "is_intro": True
+            },
+            {
+                "question": "Can you walk me through a challenging project you've worked on recently? What was your role, and what was the outcome?",
+                "category": "Project Experience",
+                "keywords": ["project", "challenge", "outcome"],
+                "is_intro": True
+            }
+        ]
 
 IT_JOB_ROLES = [
     "Data Scientist", "ML Engineer", "AI/ML Researcher", "Data Engineer", "Data Analyst",
@@ -352,14 +640,14 @@ IT_JOB_ROLES = [
     "Blockchain Developer", "NLP Engineer", "Computer Vision Engineer"
 ]
 
+# ✅ FIXED: Only 2 modes now (removed Company Style)
 INTERVIEW_MODES = {
-    "Practice Mode": "Hints allowed, ideal answers shown",
-    "Strict Interview": "Timed, feedback at end only",
-    "Company Style": "Customize to specific patterns"
+    "Practice Mode": "Lighter interview flow, 2 intro + 3 technical questions",
+    "Strict Interview": "Real interview simulation, 3 intro + 5 technical questions"
 }
 
 # ═══════════════════════════════════════════════════════════
-# RESUME PARSING
+# RESUME PARSING & SCORING
 # ═══════════════════════════════════════════════════════════
 def parse_resume(uploaded_file):
     try:
@@ -390,11 +678,8 @@ def extract_skills(text):
     return found_skills
 
 def extract_experience(text):
-    import re
     match = re.search(r'(\d+)\+?\s*years?\s+(?:of\s+)?experience', text.lower())
     return int(match.group(1)) if match else 0
-
-
 
 ROLE_REQUIRED_SKILLS = {
     "Data Scientist": {
@@ -447,7 +732,6 @@ ROLE_REQUIRED_SKILLS = {
     },
 }
 
-# Common skill synonyms/aliases (helps realism)
 _SKILL_ALIASES = {
     "machine learning": ["ml", "machine-learning"],
     "scikit-learn": ["sklearn", "scikit learn"],
@@ -464,12 +748,11 @@ _SKILL_ALIASES = {
 def _normalize_text(s: str) -> str:
     s = (s or "").lower()
     s = s.replace("&", " and ")
-    s = re.sub(r"[^a-z0-9\.\+\-\s/]", " ", s)  # keep . + - / for things like node.js, ci/cd
+    s = re.sub(r"[^a-z0-9\.\+\-\s/]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
-    return f" {s} "  # pad for safer "in" checks
+    return f" {s} "
 
 def _skill_present(text: str, skill: str) -> bool:
-    """Checks if a skill or any of its aliases appear in normalized text."""
     skill_n = _normalize_text(skill).strip()
     if f" {skill_n} " in text:
         return True
@@ -480,83 +763,46 @@ def _skill_present(text: str, skill: str) -> bool:
     return False
 
 def calculate_resume_score(resume_text: str, skills: dict, experience: int, job_role: str) -> int:
-    """
-    Role-aware resume scoring.
-    Uses extracted skills + experience.
-    Output range: 18-92 (more realistic than 0-100).
-    Deterministic for same (skills, exp, role).
-    """
-
+    """Role-aware resume scoring (15-92 range)"""
     requirements = ROLE_REQUIRED_SKILLS.get(job_role, {
         "must_have": ["programming"],
         "preferred": [],
         "bonus": [],
         "min_experience": 1
     })
-
-    # Flatten extracted skills safely
+    
     all_resume_skills = []
     if isinstance(skills, dict):
         for _, skill_list in skills.items():
             if isinstance(skill_list, list):
                 all_resume_skills.extend([str(s) for s in skill_list if s])
-
-    # Build normalized search text from extracted skill list
+    
     resume_text = _normalize_text(resume_text)
-
-    # If resume had almost no detected skills, keep it low but not zero
     detected_skill_count = len(all_resume_skills)
-
-    # -----------------------------
-    # Scoring components (0..100-ish internal, then clamp)
-    # -----------------------------
+    
     score = 0
-
-    # A) Must-have skills (max 44)
-    # Strong penalty for missing must-haves
+    
     must_have = requirements["must_have"]
-    must_found = 0
-    for sk in must_have:
-        if _skill_present(resume_text, sk):
-            must_found += 1
-
-    if len(must_have) > 0:
-        must_ratio = must_found / len(must_have)
-    else:
-        must_ratio = 0.0
-
-    # Base must score
+    must_found = sum(1 for sk in must_have if _skill_present(resume_text, sk))
+    must_ratio = must_found / len(must_have) if len(must_have) > 0 else 0.0
     must_score = int(44 * must_ratio)
-
-    # Extra penalty if many missing
     missing = len(must_have) - must_found
-    must_score -= missing * 6  # -6 per missing must-have
+    must_score -= missing * 6
     must_score = max(0, must_score)
     score += must_score
-
-    # B) Preferred skills (max 28)
+    
     preferred = requirements["preferred"]
-    pref_found = 0
-    for sk in preferred:
-        if _skill_present(resume_text, sk):
-            pref_found += 1
-    # up to 28 points
+    pref_found = sum(1 for sk in preferred if _skill_present(resume_text, sk))
     pref_score = min(28, pref_found * 4)
     score += pref_score
-
-    # C) Bonus skills (max 10)
+    
     bonus = requirements["bonus"]
-    bonus_found = 0
-    for sk in bonus:
-        if _skill_present(resume_text, sk):
-            bonus_found += 1
+    bonus_found = sum(1 for sk in bonus if _skill_present(resume_text, sk))
     bonus_score = min(10, bonus_found * 2)
     score += bonus_score
-
-    # D) Experience (max 18)
+    
     exp = max(0, int(experience or 0))
     min_exp = int(requirements.get("min_experience", 1))
-
     if exp >= min_exp + 4:
         exp_score = 18
     elif exp >= min_exp + 2:
@@ -568,30 +814,45 @@ def calculate_resume_score(resume_text: str, skills: dict, experience: int, job_
     else:
         exp_score = 6
     score += exp_score
-
-    # E) “Completeness” nudge (0..6)
-    # Prevents all roles always getting 55% when resume has many skills
+    
     if detected_skill_count >= 12:
         score += 6
     elif detected_skill_count >= 8:
         score += 4
     elif detected_skill_count >= 4:
         score += 2
-    else:
-        score += 0
-
-    # F) Small deterministic jitter (-2..+2) so scores don't look "robotic"
-    # but still deterministic per resume+role+exp.
+    
     seed_str = f"{job_role}|{exp}|{'|'.join(sorted([s.lower() for s in all_resume_skills]))}"
     h = hashlib.md5(seed_str.encode("utf-8")).hexdigest()
-    jitter = (int(h[:2], 16) % 5) - 2  # -2..+2
+    jitter = (int(h[:2], 16) % 5) - 2
     score += jitter
-
-    # -----------------------------
-    # Final clamp (realistic range)
-    # -----------------------------
-    final_score = max(18, min(92, score))
+    
+    final_score = max(15, min(92, score))
     return int(final_score)
+
+# ═══════════════════════════════════════════════════════════
+# TTS HELPER
+# ═══════════════════════════════════════════════════════════
+def speak_question(question_text: str, unique_key: str):
+    """Speak question using browser TTS"""
+    escaped_text = question_text.replace('"', '\\"').replace("'", "\\'")
+    
+    st.components.v1.html(f"""
+    <script>
+    (function() {{
+        const text = "{escaped_text}";
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.9;
+        utterance.pitch = 1.0;
+        
+        if (window.speechSynthesis) {{
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+        }}
+    }})();
+    </script>
+    """, height=0)
+
 # ═══════════════════════════════════════════════════════════
 # SESSION STATE
 # ═══════════════════════════════════════════════════════════
@@ -625,26 +886,155 @@ if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 if 'interview_mode' not in st.session_state:
     st.session_state.interview_mode = "Practice Mode"
+if 'character_fullscreen' not in st.session_state:
+    st.session_state.character_fullscreen = False
+if 'current_question_text' not in st.session_state:
+    st.session_state.current_question_text = ""
 
 # ═══════════════════════════════════════════════════════════
-# CSS
+# GLOBAL CSS - FIXED UI
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <style>
 .main-header { font-size: 3rem; font-weight: bold; text-align: center; color: #1E88E5; }
-.feature-box { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    padding: 24px; border-radius: 12px; margin: 15px 0; border-left: 5px solid #1E88E5; }
-.feature-box h3 { color: #1a1a1a !important; font-weight: 700 !important; }
-.stButton>button { background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
-    color: white !important; border-radius: 8px; padding: 0.6rem 2rem; font-weight: 600; }
-.score-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 24px; border-radius: 12px; color: white; text-align: center; }
-.ideal-answer { background: #e8f5e9; border-left: 4px solid #4caf50;
-    padding: 16px; border-radius: 8px; margin: 10px 0; }
-.rewritten-answer { background: #e3f2fd; border-left: 4px solid #2196f3;
-    padding: 16px; border-radius: 8px; margin: 10px 0; }
-.timer-warning { background: #fff3cd; color: #856404; padding: 12px;
-    border-radius: 8px; margin: 10px 0; font-weight: 600; }
+
+.feature-card {
+    background: linear-gradient(145deg, #1e293b 0%, #334155 100%);
+    border-radius: 16px;
+    padding: 32px 24px;
+    text-align: center;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    transition: all 0.3s ease;
+    height: 200px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    cursor: default;
+    pointer-events: none;
+}
+.feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(96, 165, 250, 0.2);
+}
+.feature-card h3 {
+    color: #60a5fa !important;
+    font-size: 1.5rem !important;
+    margin-bottom: 12px !important;
+    font-weight: 600 !important;
+}
+.feature-card p {
+    color: #cbd5e1;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.question-card {
+    background: #0f172a;
+    border-radius: 12px;
+    padding: 32px;
+    margin: 20px 0;
+    border-left: 5px solid #3b82f6;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.question-card h3 {
+    color: #f8fafc !important;
+    font-size: 1.4rem !important;
+    line-height: 1.8 !important;
+    margin-bottom: 16px !important;
+    font-weight: 500 !important;
+}
+.question-card p {
+    color: #cbd5e1;
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.caption-box {
+    background: #1e293b;
+    border: 2px solid #3b82f6;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 16px 0;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+.caption-box h4 {
+    color: #60a5fa;
+    font-size: 0.9rem;
+    margin: 0 0 8px 0;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.caption-box p {
+    color: #f8fafc;
+    font-size: 1.2rem;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.score-card { 
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 24px; 
+    border-radius: 12px; 
+    color: white; 
+    text-align: center; 
+}
+
+.ideal-answer { 
+    background: #e8f5e9; 
+    border-left: 4px solid #4caf50;
+    padding: 16px; 
+    border-radius: 8px; 
+    margin: 10px 0;
+    color: #1b5e20;
+}
+
+.rewritten-answer { 
+    background: #e3f2fd; 
+    border-left: 4px solid #2196f3;
+    padding: 16px; 
+    border-radius: 8px; 
+    margin: 10px 0;
+    color: #0d47a1;
+}
+
+/* ✅ Fixed button styling - no more vertical text */
+.stButton>button { 
+    background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
+    color: white !important; 
+    border-radius: 8px; 
+    padding: 0.6rem 2rem !important; 
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    text-align: center;
+    display: inline-block;
+}
+
+.stButton>button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(30, 136, 229, 0.4);
+}
+
+/* ✅ Fix column alignment - prevents vertical button layout */
+[data-testid="column"] {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+}
+
+/* ✅ Ensure iframe fits properly - no overflow */
+iframe {
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    max-width: 100%;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -652,7 +1042,7 @@ st.markdown("""
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════
 st.sidebar.title("🎯 Navigation")
-page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview","🎙️ Voice Interview", "📊 Results", "📈 Progress"])
+page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview", "📊 Results", "📈 Progress"])
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Settings")
@@ -673,45 +1063,9 @@ else:
 # ═══════════════════════════════════════════════════════════
 # PAGES
 # ═══════════════════════════════════════════════════════════
+
 if page == "🏠 Home":
     st.markdown("<h1 class='main-header'>🎤 AI-Powered Interview Preparation System</h1>", unsafe_allow_html=True)
-    
-    # ✅ IMPROVED FEATURE CARDS (GOAL 1)
-    st.markdown("""
-    <style>
-    .feature-card {
-        background: linear-gradient(145deg, #1e293b 0%, #334155 100%);
-        border-radius: 16px;
-        padding: 32px 24px;
-        text-align: center;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-        border: 1px solid rgba(148, 163, 184, 0.1);
-        transition: all 0.3s ease;
-        height: 200px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        cursor: default;
-        pointer-events: none;
-    }
-    .feature-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 12px 32px rgba(96, 165, 250, 0.2);
-    }
-    .feature-card h3 {
-        color: #60a5fa !important;
-        font-size: 1.5rem !important;
-        margin-bottom: 12px !important;
-        font-weight: 600 !important;
-    }
-    .feature-card p {
-        color: #cbd5e1;
-        font-size: 1rem;
-        line-height: 1.6;
-        margin: 0;
-    }
-    </style>
-    """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3, gap="large")
     
@@ -739,7 +1093,6 @@ if page == "🏠 Home":
         </div>
         """, unsafe_allow_html=True)
     
-    # Show stats from database (keep existing code)
     sessions = load_session_history()
     if sessions:
         st.markdown("---")
@@ -761,7 +1114,7 @@ elif page == "📄 Resume":
             text, skills, exp = parse_resume(uploaded)
             st.session_state.resume_skills = skills
             st.session_state.resume_experience = exp
-            st.session_state.resume_score = calculate_resume_score(text,skills, exp, job_role)
+            st.session_state.resume_score = calculate_resume_score(text, skills, exp, job_role)
             st.balloons()
             st.rerun()
     
@@ -769,14 +1122,22 @@ elif page == "📄 Resume":
         score = st.session_state.resume_score
         st.markdown(f"<div class='score-card'><h2>{score}%</h2><p>{job_role} Match</p></div>", unsafe_allow_html=True)
 
+# ═══════════════════════════════════════════════════════════
+# ✅ FIXED INTERVIEW PAGE - CLEAN UI, 2 MODES ONLY
+# ═══════════════════════════════════════════════════════════
 elif page == "🎤 Interview":
     st.title("🎤 Professional Interview")
     
-    # ✅ ADD RESTART BUTTON (GOAL 3)
+    # ✅ Get dynamic question counts based on mode
+    intro_count = 2 if interview_mode == "Practice Mode" else 3
+    tech_count = 3 if interview_mode == "Practice Mode" else 5
+    total_count = intro_count + tech_count
+    
+    # Restart button
     if st.session_state.interview_stage != 'not_started':
         col_restart, col_spacer = st.columns([1, 5])
         with col_restart:
-            if st.button("🔄 Restart", width=True):
+            if st.button("🔄 Restart", use_container_width=True):
                 st.session_state.interview_stage = 'not_started'
                 st.session_state.question_num = 0
                 st.session_state.answers = []
@@ -786,67 +1147,104 @@ elif page == "🎤 Interview":
                 st.session_state.intro_questions = []
                 st.session_state.conversation_history = []
                 st.session_state.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                st.session_state.current_question_text = ""
                 st.rerun()
     
-    # ✅ IMPROVED QUESTION CARD CSS (GOAL 3)
-    st.markdown("""
-    <style>
-    .question-card {
-        background: linear-gradient(145deg, #1e293b 0%, #334155 100%);
-        border-radius: 12px;
-        padding: 28px;
-        margin: 20px 0;
-        border-left: 5px solid #3b82f6;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-    }
-    .question-card h3 {
-        color: #f1f5f9 !important;
-        font-size: 1.3rem !important;
-        line-height: 1.6 !important;
-        margin-bottom: 16px !important;
-        font-weight: 500 !important;
-    }
-    .question-card p {
-        color: #94a3b8;
-        font-size: 0.95rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([2, 1, 1])
+    # ✅ Top info bar - Fixed layout (no vertical buttons)
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         st.markdown(f"### 🎯 {job_role}")
     with col2:
-        # ✅ FIXED TIMER (GOAL 3)
+        st.markdown(f"**Mode:** {interview_mode.split()[0]}")
+    with col3:
         if st.session_state.interview_stage != 'not_started':
             elapsed = (datetime.now() - st.session_state.start_time).seconds
-            st.markdown(f"### ⏱️ {elapsed//60:02d}:{elapsed%60:02d}")
+            st.markdown(f"**⏱️** {elapsed//60:02d}:{elapsed%60:02d}")
         else:
-            st.markdown(f"### ⏱️ --:--")
-    with col3:
+            st.markdown(f"**⏱️** --:--")
+    with col4:
         if st.session_state.question_start_time and st.session_state.interview_stage != 'not_started':
-            st.markdown(f"### 🕐 {(datetime.now() - st.session_state.question_start_time).seconds}s")
+            st.markdown(f"**🕐** {(datetime.now() - st.session_state.question_start_time).seconds}s")
     
     st.markdown("---")
     
-    # 3D AVATAR (keep existing iframe)
+    # ✅ 3D Interviewer Section - Fixed layout
     st.subheader("🤖 AI Interviewer")
-    st.components.v1.iframe(FRONTEND_URL, height=600, scrolling=False)
+    
+    # ✅ Fullscreen toggle - Fixed horizontal layout
+    col_fs, col_spacer = st.columns([1, 5])
+    with col_fs:
+        if st.button(
+            "🖥️ Fullscreen" if not st.session_state.character_fullscreen else "🔲 Exit", 
+            use_container_width=True
+        ):
+            st.session_state.character_fullscreen = not st.session_state.character_fullscreen
+            st.rerun()
+    
+    # Character iframe - responsive height
+    iframe_height = 850 if st.session_state.character_fullscreen else 600
+    st.components.v1.iframe(FRONTEND_URL, height=iframe_height, scrolling=False)
+    
+    # Voice interview integration (collapsible)
+    with st.expander("🎙️ Voice Interview Mode", expanded=False):
+        st.info("💡 Use microphone for hands-free interview practice")
+        voice_url = f"{FRONTEND_URL}/voice"
+        st.components.v1.html(f"""
+        <iframe 
+            src="{voice_url}" 
+            width="100%" 
+            height="700" 
+            frameborder="0"
+            allow="microphone"
+            style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);"
+        ></iframe>
+        """, height=700)
     
     st.markdown("---")
+    
+    # ═══════════════════════════════════════════════════════════
+    # ✅ INTERVIEW FLOW - Dynamic by Mode
+    # ═══════════════════════════════════════════════════════════
     
     if st.session_state.interview_stage == 'not_started':
-        st.markdown(f"""<div class='feature-box'><h3>Interview Structure:</h3>
-        <p><strong>Round 1:</strong> Introduction (3 questions)</p>
-        <p><strong>Round 2:</strong> Technical (5 adaptive questions)</p>
-        <p><strong>Memory:</strong> Stored in SQLite for learning</p></div>""", unsafe_allow_html=True)
+        # ✅ Dynamic interview structure display based on mode
+        if interview_mode == "Practice Mode":
+            structure_html = f"""
+            <div class='question-card'>
+                <h3>📋 Practice Interview Structure</h3>
+                <p><strong>Round 1:</strong> Introduction ({intro_count} questions)</p>
+                <p><strong>Round 2:</strong> Technical ({tech_count} questions)</p>
+                <p><strong>Total:</strong> {total_count} questions</p>
+                <p style='color: #60a5fa; margin-top: 16px;'>
+                    ✨ Friendly practice simulation - Take your time and learn!
+                </p>
+            </div>
+            """
+        else:  # Strict Interview
+            structure_html = f"""
+            <div class='question-card'>
+                <h3>📋 Professional Interview Structure</h3>
+                <p><strong>Round 1:</strong> Introduction ({intro_count} questions)</p>
+                <p><strong>Round 2:</strong> Technical ({tech_count} questions)</p>
+                <p><strong>Total:</strong> {total_count} questions</p>
+                <p style='color: #f59e0b; margin-top: 16px;'>
+                    🎯 Real interview simulation - Professional evaluation
+                </p>
+            </div>
+            """
         
-        if st.button("🚀 START", width=True, type="primary"):
+        st.markdown(structure_html, unsafe_allow_html=True)
+        
+        # Start button
+        if st.button("🚀 START INTERVIEW", use_container_width=True, type="primary"):
             st.session_state.interview_stage = 'intro'
             st.session_state.question_num = 1
             st.session_state.start_time = datetime.now()
             st.session_state.question_start_time = datetime.now()
-            st.session_state.intro_questions = get_intro_questions(job_role)
+            
+            # ✅ Generate intro questions based on mode
+            st.session_state.intro_questions = get_intro_questions(job_role, interview_mode)
+            
             st.session_state.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             st.rerun()
     
@@ -856,20 +1254,37 @@ elif page == "🎤 Interview":
         if st.session_state.question_num <= len(intro_qs):
             q = intro_qs[st.session_state.question_num - 1]
             
-            st.subheader(f"Introduction - Q{st.session_state.question_num}/{len(intro_qs)}")
-            st.markdown(f"""
-    <div class='question-card'>
-        <h3>{q['question']}</h3>
-    </div>
-    """, unsafe_allow_html=True)
+            st.session_state.current_question_text = q['question']
             
+            # Progress indicator
+            st.subheader(f"Introduction - Question {st.session_state.question_num}/{len(intro_qs)}")
+            
+            # Live caption with question
+            st.markdown(f"""
+            <div class='caption-box'>
+                <h4>🎤 AI Interviewer is asking:</h4>
+                <p>{q['question']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Auto-speak question
+            speak_question(q['question'], f"intro_{st.session_state.session_id}_{st.session_state.question_num}")
+            
+            # Replay button
+            col_replay, col_spacer = st.columns([1, 5])
+            with col_replay:
+                if st.button("🔊 Replay", use_container_width=True):
+                    speak_question(q['question'], f"intro_replay_{st.session_state.question_num}_{datetime.now().timestamp()}")
+            
+            # Answer input
             answer = st.text_area("Your Answer:", height=120, key=f"intro_{st.session_state.question_num}")
             
-            if st.button("📤 Submit", width=True, type="primary"):
+            # Submit button
+            if st.button("📤 Submit Answer", use_container_width=True, type="primary"):
                 if answer and len(answer.strip()) > 10:
                     answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
                     
-                    # Save to SQLite
+                    # Save to database
                     save_conversation(st.session_state.session_id, q['question'], answer, q['category'])
                     
                     st.session_state.conversation_history.append({"q": q['question'], "a": answer})
@@ -881,19 +1296,28 @@ elif page == "🎤 Interview":
                     st.session_state.question_num += 1
                     st.session_state.question_start_time = datetime.now()
                     
+                    # Move to technical stage when intro complete
                     if st.session_state.question_num > len(intro_qs):
                         st.session_state.interview_stage = 'technical'
                         st.session_state.question_num = 1
                         
-                        with st.spinner("Generating questions..."):
-                            # Get conversation from database
+                        # ✅ Generate technical questions with dynamic count based on mode
+                        tech_count = 3 if interview_mode == "Practice Mode" else 5
+                        
+                        with st.spinner("Generating personalized technical questions..."):
                             context = get_conversation_context(st.session_state.session_id)
                             st.session_state.technical_questions = generate_personalized_questions(
-                                job_role, difficulty, st.session_state.resume_skills, context, 5
+                                job_role, 
+                                difficulty, 
+                                st.session_state.resume_skills, 
+                                context, 
+                                num_questions=tech_count  # ✅ Dynamic based on mode
                             )
-                        st.success("✅ Generated with memory!")
+                        st.success(f"✅ Generated {tech_count} technical questions based on your background!")
                     
                     st.rerun()
+                else:
+                    st.warning("⚠️ Please provide a longer answer (at least 10 characters)")
     
     elif st.session_state.interview_stage == 'technical':
         questions = st.session_state.technical_questions
@@ -901,30 +1325,60 @@ elif page == "🎤 Interview":
         if st.session_state.question_num <= len(questions):
             q = questions[st.session_state.question_num - 1]
             
-            st.subheader(f"Technical - Q{st.session_state.question_num}/{len(questions)}")
-            st.markdown(f"""
-    <div class='question-card'>
-        <h3>{q['question']}</h3>
-        <p><strong>Type:</strong> {q.get('type', 'conceptual').title()}</p>
-    </div>
-    """, unsafe_allow_html=True)
+            st.session_state.current_question_text = q['question']
             
+            # Progress indicator
+            st.subheader(f"Technical - Question {st.session_state.question_num}/{len(questions)}")
+            
+            # Live caption with question
+            st.markdown(f"""
+            <div class='caption-box'>
+                <h4>🎤 AI Interviewer is asking:</h4>
+                <p>{q['question']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Auto-speak question
+            speak_question(q['question'], f"tech_{st.session_state.session_id}_{st.session_state.question_num}")
+            
+            # Replay button
+            col_replay, col_spacer = st.columns([1, 5])
+            with col_replay:
+                if st.button("🔊 Replay", use_container_width=True):
+                    speak_question(q['question'], f"tech_replay_{st.session_state.question_num}_{datetime.now().timestamp()}")
+            
+            # Question metadata
+            st.markdown(f"""
+            <p style='color: #94a3b8; font-size: 0.95rem; margin-top: 8px;'>
+                <strong>Type:</strong> {q.get('type', 'conceptual').title()} | 
+                <strong>Category:</strong> {q.get('category', 'General')}
+            </p>
+            """, unsafe_allow_html=True)
+            
+            # Answer input
             answer = st.text_area("Your Answer:", height=150, key=f"tech_{st.session_state.question_num}")
             
+            # Submit controls
             col1, col2 = st.columns([3, 1])
             with col1:
-                if st.button("📤 Submit", width=True, type="primary"):
+                if st.button("📤 Submit Answer", use_container_width=True, type="primary"):
                     if answer and len(answer.strip()) > 15:
                         answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
                         
-                        with st.spinner("Evaluating..."):
+                        with st.spinner("Evaluating your answer..."):
                             result = evaluate_with_rubric(q['question'], answer, q['keywords'], q.get('type'))
                             
-                            # Save to SQLite
+                            # Save to database
                             save_conversation(st.session_state.session_id, q['question'], answer, q['category'])
-                            save_performance(st.session_state.session_id, q['question'], answer, 
-                                           result['total_score'], result['rubric'], 
-                                           result['feedback'], answer_time)
+                            save_performance(
+                                st.session_state.session_id, 
+                                q['question'], 
+                                answer, 
+                                result['total_score'], 
+                                result['rubric'], 
+                                result['feedback'], 
+                                answer_time
+                            )
                             
                             st.session_state.answers.append({
                                 "q": q['question'], "a": answer, "category": q['category'],
@@ -940,57 +1394,73 @@ elif page == "🎤 Interview":
                             # Show feedback
                             st.success(f"✅ Score: {result['total_score']}/100")
                             
+                            # Rubric breakdown
                             cols = st.columns(5)
                             r = result['rubric']
-                            cols[0].metric("Correct", f"{r['correctness']}/40")
+                            cols[0].metric("Correctness", f"{r['correctness']}/40")
                             cols[1].metric("Depth", f"{r['depth']}/25")
                             cols[2].metric("Clarity", f"{r['clarity']}/15")
                             cols[3].metric("Structure", f"{r['structure']}/10")
-                            cols[4].metric("Real", f"{r['real_world']}/10")
+                            cols[4].metric("Real-world", f"{r['real_world']}/10")
                             
+                            # Ideal answer outline
                             if result.get('ideal_answer_outline'):
-                                st.markdown("<div class='ideal-answer'>" + "<br>".join([f"• {p}" for p in result['ideal_answer_outline']]) + "</div>", unsafe_allow_html=True)
+                                st.markdown("**💡 Key Points to Cover:**")
+                                st.markdown(
+                                    "<div class='ideal-answer'>" + 
+                                    "<br>".join([f"• {p}" for p in result['ideal_answer_outline']]) + 
+                                    "</div>", 
+                                    unsafe_allow_html=True
+                                )
                             
+                            # Professional rewrite
                             if result.get('rewritten_answer'):
-                                st.markdown(f"<div class='rewritten-answer'>{result['rewritten_answer']}</div>", unsafe_allow_html=True)
+                                st.markdown("**✨ Professional Version:**")
+                                st.markdown(
+                                    f"<div class='rewritten-answer'>{result['rewritten_answer']}</div>", 
+                                    unsafe_allow_html=True
+                                )
                             
                             st.session_state.question_num += 1
                             st.session_state.question_start_time = datetime.now()
                             
+                            # Complete interview when all questions done
                             if st.session_state.question_num > len(questions):
                                 st.session_state.interview_stage = 'complete'
-                                # Save session
                                 avg = sum(st.session_state.scores) / len(st.session_state.scores)
-                                save_session(st.session_state.session_id, job_role, difficulty, interview_mode, avg)
+                                save_session(
+                                    st.session_state.session_id, 
+                                    job_role, 
+                                    difficulty, 
+                                    interview_mode, 
+                                    avg
+                                )
                             
                             time.sleep(2)
                             st.rerun()
+                    else:
+                        st.warning("⚠️ Please provide a more detailed answer (at least 15 characters)")
             
             with col2:
                 st.metric("Words", len(answer.split()) if answer else 0)
             
+            # Progress bar
             st.progress(min((st.session_state.question_num - 1) / len(questions), 1.0))
     
     elif st.session_state.interview_stage == 'complete':
         st.success("🎉 Interview Complete!")
-        st.info("📊 Check Results for detailed feedback")
-
-
-elif page == "🎙️ Voice Interview":
-    st.title("🎙️ Voice-Based Interview Mode")
-    st.info("💡 This feature uses the FastAPI voice server. Make sure it's running on port 8000!")
-
-    voice_url = f"{FRONTEND_URL}/voice"
-    st.components.v1.html(f"""
-    <iframe 
-        src="{voice_url}" 
-        width="100%" 
-        height="900" 
-        frameborder="0"
-        allow="microphone"
-        style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);"
-    ></iframe>
-    """, height=900)
+        st.info("📊 Go to the Results page for detailed feedback and your personalized improvement plan")
+        
+        # Summary stats
+        if st.session_state.scores:
+            avg = sum(st.session_state.scores) / len(st.session_state.scores)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Overall Score", f"{avg:.0f}%")
+            with col2:
+                st.metric("Questions Answered", len(st.session_state.scores))
+            with col3:
+                st.metric("Mode", interview_mode)
 
 elif page == "📊 Results":
     st.title("📊 Performance Report")
@@ -1021,19 +1491,27 @@ elif page == "📊 Results":
                     for p in ans['ideal_answer']:
                         st.markdown(f"• {p}")
         
+        st.markdown("---")
+        
         if st.button("📈 Generate 7-Day Plan"):
-            with st.spinner("Creating plan..."):
-                cat_scores = {}
-                for ans in tech:
-                    if ans['category'] not in cat_scores:
-                        cat_scores[ans['category']] = []
-                    cat_scores[ans['category']].append(ans['score'])
+            with st.spinner("Creating personalized plan..."):
+                plan = generate_improvement_plan(st.session_state.session_id, job_role)
                 
-                plan = generate_improvement_plan(cat_scores, job_role)
-                for day in plan:
-                    st.markdown(f"**Day {day['day']}: {day.get('focus')}**")
-                    for task in day.get('tasks', []):
-                        st.markdown(f"• {task}")
+                if plan:
+                    st.success("✅ Personalized 7-Day Improvement Plan")
+                    for day_plan in plan:
+                        with st.expander(f"📅 Day {day_plan['day']}: {day_plan['focus']}", expanded=(day_plan['day']==1)):
+                            st.markdown(f"**🎯 Focus:** {day_plan['focus']}")
+                            
+                            st.markdown("**📝 Tasks:**")
+                            for task in day_plan['tasks']:
+                                st.markdown(f"✓ {task}")
+                            
+                            st.markdown("**📚 Resources:**")
+                            for resource in day_plan['resources']:
+                                st.markdown(f"• {resource}")
+                else:
+                    st.info("Complete an interview to generate a personalized plan.")
 
 elif page == "📈 Progress":
     st.title("📈 Performance Dashboard")
@@ -1043,12 +1521,10 @@ elif page == "📈 Progress":
     if not sessions:
         st.info("💡 Complete interviews to track your progress!")
     else:
-        # Prepare data
         df = pd.DataFrame(sessions, columns=['ID', 'Role', 'Difficulty', 'Score', 'Date'])
         df['Date'] = pd.to_datetime(df['Date'])
         df = df.sort_values('Date')
         
-        # ═══ KPI CARDS ═══
         st.subheader("📊 Key Performance Indicators")
         
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -1077,15 +1553,13 @@ elif page == "📈 Progress":
         
         st.markdown("---")
         
-        # ═══ SCORE TREND ═══
         st.subheader("📈 Score Trend Over Time")
         chart_df = df[['Date', 'Score']].copy()
         chart_df = chart_df.set_index('Date')
-        st.line_chart(chart_df, width=True, height=300)
+        st.line_chart(chart_df, use_container_width=True, height=300)
         
         st.markdown("---")
         
-        # ═══ CATEGORY PERFORMANCE ═══
         st.subheader("📊 Performance by Category")
         
         conn = sqlite3.connect('interview_memory.db')
@@ -1113,18 +1587,16 @@ elif page == "📈 Progress":
             if count > 0:
                 category_avgs = {k: v / count for k, v in category_totals.items()}
                 category_df = pd.DataFrame(list(category_avgs.items()), columns=['Category', 'Score'])
-                st.bar_chart(category_df.set_index('Category'), width=True, height=300)
+                st.bar_chart(category_df.set_index('Category'), use_container_width=True, height=300)
         
         st.markdown("---")
         
-        # ═══ SESSION HISTORY TABLE ═══
         st.subheader("📋 Session History")
         
         display_df = df[['Date', 'Role', 'Difficulty', 'Score']].copy()
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
         display_df['Score'] = display_df['Score'].apply(lambda x: f"{x:.0f}%")
         
-        st.dataframe(display_df, width=True, hide_index=True)
-
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 st.markdown("<div style='text-align:center;color:#888'><p>AI Interview Prep | SQLite Memory | Premium Features</p></div>", unsafe_allow_html=True)
