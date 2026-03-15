@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useRef ,useMemo} from "react";
+// Scene3D.jsx - COMPLETE FIXED VERSION
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, useGLTF, useAnimations ,useTexture} from "@react-three/drei";
+import { OrbitControls, useGLTF, useAnimations, useTexture } from "@react-three/drei";
 import * as THREE from "three";
-import { Link } from "react-router-dom";
-
-
 
 // ═══════════════════════════════════════════════════════════
-// AVATAR - GUARANTEED IDLE START (YOUR WORKING PATTERN)
+// AVATAR WITH TALKING ANIMATION
 // ═══════════════════════════════════════════════════════════
 function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
   const group = useRef();
@@ -18,7 +16,6 @@ function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
   const sittingGltf = useGLTF("/animations/Sitting.glb");
   const talkingGltf = useGLTF("/animations/Talking.glb");
 
-  // ✅ Fix: clone + rename clips so actions don't overwrite each other
   const sitClip = useMemo(() => {
     const c = sittingGltf.animations?.[0]?.clone();
     if (c) c.name = "SITTING";
@@ -34,7 +31,7 @@ function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
   const clips = useMemo(() => [sitClip, talkClip].filter(Boolean), [sitClip, talkClip]);
   const { actions } = useAnimations(clips, group);
 
-  // Character scaling (same logic)
+  // Character scaling
   useEffect(() => {
     if (!scene) return;
     const box = new THREE.Box3().setFromObject(scene);
@@ -49,7 +46,7 @@ function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
     scene.position.set(-newCenter.x, -newBox.min.y, -newCenter.z - 0.03);
   }, [scene]);
 
-  // ✅ GUARANTEED IDLE START: play SITTING once
+  // Start with SITTING animation
   useEffect(() => {
     if (!actions?.SITTING || initializedRef.current) return;
 
@@ -67,10 +64,9 @@ function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
 
     currentAction.current = actions.SITTING;
     initializedRef.current = true;
-    console.log("✅ Avatar IDLE (SITTING)");
   }, [actions]);
 
-  // ✅ Switch between SITTING and TALKING
+  // Switch between SITTING and TALKING
   useEffect(() => {
     if (!initializedRef.current || !actions?.SITTING || !actions?.TALKING) return;
 
@@ -86,35 +82,29 @@ function Avatar({ isTalking, position = [0, 0.10, 0.1] }) {
 
     currentAction.current?.fadeOut(0.2);
     currentAction.current = next;
-
-    console.log(isTalking ? "🗣️ TALKING" : "💺 SITTING");
   }, [isTalking, actions]);
 
   return <primitive ref={group} object={scene} position={position} castShadow />;
 }
 
+// ═══════════════════════════════════════════════════════════
+// SCENE COMPONENTS - FULL OFFICE ENVIRONMENT
+// ═══════════════════════════════════════════════════════════
 function WallArt() {
   const art = useTexture("/textures/wallart.png");
-
-  // If this line throws error in your three version, remove it.
-    if ("colorSpace" in art) art.colorSpace = THREE.SRGBColorSpace;
-    if ("encoding" in art) art.encoding = THREE.sRGBEncoding;
+  if ("colorSpace" in art) art.colorSpace = THREE.SRGBColorSpace;
+  if ("encoding" in art) art.encoding = THREE.sRGBEncoding;
 
   return (
     <group position={[0, 2.2, -3.9]}>
-      {/* Frame */}
       <mesh castShadow>
         <boxGeometry args={[0.9, 0.7, 0.04]} />
         <meshStandardMaterial color="#0f172a" roughness={0.5} metalness={0.2} />
       </mesh>
-
-      {/* Artwork */}
       <mesh position={[0, 0, 0.025]}>
         <planeGeometry args={[0.78, 0.58]} />
         <meshStandardMaterial map={art} roughness={0.8} />
       </mesh>
-
-      {/* Glass shine */}
       <mesh position={[0, 0, 0.028]}>
         <planeGeometry args={[0.8, 0.6]} />
         <meshPhysicalMaterial
@@ -129,9 +119,222 @@ function WallArt() {
     </group>
   );
 }
-// ═══════════════════════════════════════════════════════════
-// ENHANCED OFFICE SCENE WITH DECORATIONS
-// ═══════════════════════════════════════════════════════════
+
+function Desk() {
+  return (
+    <group position={[0, 0, 0]}>
+      {/* Desk top */}
+      <mesh position={[0, 0.9, 0]} castShadow receiveShadow>
+        <boxGeometry args={[2.8, 0.08, 1.2]} />
+        <meshStandardMaterial color="#3d2817" roughness={0.6} metalness={0.1} />
+      </mesh>
+      
+      {/* Desk legs */}
+      <mesh position={[-1.2, 0.45, 0.4]} castShadow>
+        <boxGeometry args={[0.08, 0.9, 0.08]} />
+        <meshStandardMaterial color="#2d1f12" roughness={0.7} />
+      </mesh>
+      <mesh position={[1.2, 0.45, 0.4]} castShadow>
+        <boxGeometry args={[0.08, 0.9, 0.08]} />
+        <meshStandardMaterial color="#2d1f12" roughness={0.7} />
+      </mesh>
+      <mesh position={[-1.2, 0.45, -0.4]} castShadow>
+        <boxGeometry args={[0.08, 0.9, 0.08]} />
+        <meshStandardMaterial color="#2d1f12" roughness={0.7} />
+      </mesh>
+      <mesh position={[1.2, 0.45, -0.4]} castShadow>
+        <boxGeometry args={[0.08, 0.9, 0.08]} />
+        <meshStandardMaterial color="#2d1f12" roughness={0.7} />
+      </mesh>
+    </group>
+  );
+}
+
+function Chair() {
+  return (
+    <group position={[0, 0.32, 0.5]}>
+      {/* Seat */}
+      <mesh position={[0, 0, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.55, 0.08, 0.55]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
+      </mesh>
+      
+      {/* Backrest */}
+      <mesh position={[0, 0.35, -0.23]} castShadow>
+        <boxGeometry args={[0.55, 0.7, 0.08]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.8} />
+      </mesh>
+      
+      {/* Center pole */}
+      <mesh position={[0, -0.15, 0]} castShadow>
+        <cylinderGeometry args={[0.04, 0.04, 0.3, 16]} />
+        <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
+      </mesh>
+      
+      {/* Base */}
+      <mesh position={[0, -0.31, 0]} rotation={[0, Math.PI / 5, 0]} castShadow>
+        <cylinderGeometry args={[0.28, 0.28, 0.04, 5]} />
+        <meshStandardMaterial color="#374151" roughness={0.6} metalness={0.3} />
+      </mesh>
+    </group>
+  );
+}
+
+function Window() {
+  return (
+    <group position={[-3.5, 2, -1]}>
+      {/* Window frame */}
+      <mesh castShadow>
+        <boxGeometry args={[0.1, 2, 1.6]} />
+        <meshStandardMaterial color="#1e293b" roughness={0.7} />
+      </mesh>
+      
+      {/* Glass panes */}
+      <mesh position={[0.06, 0.5, 0]}>
+        <planeGeometry args={[1.5, 0.9]} />
+        <meshPhysicalMaterial
+          color="#87ceeb"
+          transparent
+          opacity={0.3}
+          roughness={0.1}
+          metalness={0.1}
+          clearcoat={1}
+          clearcoatRoughness={0.1}
+        />
+      </mesh>
+      
+      <mesh position={[0.06, -0.5, 0]}>
+        <planeGeometry args={[1.5, 0.9]} />
+        <meshPhysicalMaterial
+          color="#87ceeb"
+          transparent
+          opacity={0.3}
+          roughness={0.1}
+          metalness={0.1}
+          clearcoat={1}
+          clearcoatRoughness={0.1}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function Bookshelf() {
+  return (
+    <group position={[3, 1.2, -2.5]}>
+      {/* Shelves */}
+      {[0, 0.6, 1.2].map((y, i) => (
+        <mesh key={i} position={[0, y, 0]} castShadow receiveShadow>
+          <boxGeometry args={[0.8, 0.04, 0.35]} />
+          <meshStandardMaterial color="#4a3728" roughness={0.7} />
+        </mesh>
+      ))}
+      
+      {/* Back panel */}
+      <mesh position={[0, 0.6, -0.16]} castShadow>
+        <boxGeometry args={[0.8, 1.24, 0.04]} />
+        <meshStandardMaterial color="#3d2817" roughness={0.7} />
+      </mesh>
+      
+      {/* Side panels */}
+      <mesh position={[-0.38, 0.6, 0]} castShadow>
+        <boxGeometry args={[0.04, 1.24, 0.35]} />
+        <meshStandardMaterial color="#3d2817" roughness={0.7} />
+      </mesh>
+      <mesh position={[0.38, 0.6, 0]} castShadow>
+        <boxGeometry args={[0.04, 1.24, 0.35]} />
+        <meshStandardMaterial color="#3d2817" roughness={0.7} />
+      </mesh>
+      
+      {/* Books */}
+      {[-0.2, -0.05, 0.1, 0.25].map((x, i) => (
+        <mesh key={i} position={[x, 0.22, 0]} castShadow>
+          <boxGeometry args={[0.08, 0.3, 0.22]} />
+          <meshStandardMaterial 
+            color={['#c0392b', '#2980b9', '#27ae60', '#8e44ad'][i]} 
+            roughness={0.8} 
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function Floor() {
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+      <planeGeometry args={[30, 30]} />
+      <meshStandardMaterial 
+        color="#1a1f2e" 
+        roughness={0.9} 
+        metalness={0.1} 
+      />
+    </mesh>
+  );
+}
+
+function Walls() {
+  return (
+    <>
+      {/* Back wall */}
+      <mesh position={[0, 3, -4]} receiveShadow>
+        <planeGeometry args={[20, 8]} />
+        <meshStandardMaterial color="#0f1419" roughness={0.9} />
+      </mesh>
+      
+      {/* Left wall */}
+      <mesh position={[-4, 3, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
+        <planeGeometry args={[20, 8]} />
+        <meshStandardMaterial color="#0f1419" roughness={0.9} />
+      </mesh>
+      
+      {/* Right wall */}
+      <mesh position={[4, 3, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
+        <planeGeometry args={[20, 8]} />
+        <meshStandardMaterial color="#0f1419" roughness={0.9} />
+      </mesh>
+    </>
+  );
+}
+
+function PlantPot() {
+  return (
+    <group position={[-2, 0, 1.5]}>
+      {/* Pot */}
+      <mesh castShadow>
+        <cylinderGeometry args={[0.18, 0.15, 0.3, 16]} />
+        <meshStandardMaterial color="#8b4513" roughness={0.8} />
+      </mesh>
+      
+      {/* Soil */}
+      <mesh position={[0, 0.13, 0]}>
+        <cylinderGeometry args={[0.17, 0.17, 0.04, 16]} />
+        <meshStandardMaterial color="#3e2723" roughness={1} />
+      </mesh>
+      
+      {/* Plant stems */}
+      {[0, Math.PI / 3, -Math.PI / 3].map((angle, i) => (
+        <group key={i} rotation={[0, angle, 0]}>
+          <mesh position={[0, 0.4, 0]} castShadow>
+            <cylinderGeometry args={[0.02, 0.02, 0.5, 8]} />
+            <meshStandardMaterial color="#2d5016" roughness={0.9} />
+          </mesh>
+          
+          {/* Leaves */}
+          <mesh position={[0.1, 0.5, 0]} rotation={[0, 0, Math.PI / 6]} castShadow>
+            <boxGeometry args={[0.15, 0.3, 0.01]} />
+            <meshStandardMaterial color="#4caf50" roughness={0.8} />
+          </mesh>
+          <mesh position={[-0.1, 0.55, 0]} rotation={[0, 0, -Math.PI / 6]} castShadow>
+            <boxGeometry args={[0.15, 0.3, 0.01]} />
+            <meshStandardMaterial color="#4caf50" roughness={0.8} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
 function InterviewScene({ isTalking }) {
   return (
     <>
@@ -153,279 +356,60 @@ function InterviewScene({ isTalking }) {
       
       {/* Lighting */}
       <ambientLight intensity={0.4} />
-      <directionalLight position={[4, 8, 5]} intensity={1} castShadow shadow-mapSize={[2048, 2048]} />
+      <directionalLight 
+        position={[4, 8, 5]} 
+        intensity={1} 
+        castShadow 
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-left={-10}
+        shadow-camera-right={10}
+        shadow-camera-top={10}
+        shadow-camera-bottom={-10}
+      />
       <directionalLight position={[-4, 4, -3]} intensity={0.5} color="#9bb5ff" />
       <directionalLight position={[0, 5, -8]} intensity={0.7} />
-      <spotLight position={[0, 3.5, 4]} angle={0.5} penumbra={0.5} intensity={0.4} color="#fff8f0" />
+      <spotLight 
+        position={[0, 3.5, 4]} 
+        angle={0.5} 
+        penumbra={0.5} 
+        intensity={0.4} 
+        color="#fff8f0" 
+      />
       
-      {/* Floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[15, 15]} />
-        <meshStandardMaterial color="#2d3748" roughness={0.85} />
-      </mesh>
-      <gridHelper args={[12, 24, "#3d4a5c", "#2a3441"]} position={[0, 0.005, 0]} />
-      
-      {/* ===== DESK ===== */}
-      <mesh position={[0, 0.76, 0.5]} castShadow receiveShadow>
-        <boxGeometry args={[2.0, 0.06, 0.9]} />
-        <meshStandardMaterial color="#4a3728" roughness={0.6} />
-      </mesh>
-      
-      {/* Desk legs */}
-      {[[-0.9, 0.38, 0.8], [0.9, 0.38, 0.8], [-0.9, 0.38, 0.2], [0.9, 0.38, 0.2]].map((pos, i) => (
-        <mesh key={`leg-${i}`} position={pos} castShadow>
-          <cylinderGeometry args={[0.03, 0.03, 0.76, 12]} />
-          <meshStandardMaterial color="#2c3e50" roughness={0.4} metalness={0.7} />
-        </mesh>
-      ))}
-      
-      {/* ===== BOOKS STACK ON DESK ===== */}
-      {/* Book 1 - Bottom */}
-      <mesh position={[-0.6, 0.81, 0.6]} castShadow>
-        <boxGeometry args={[0.25, 0.04, 0.35]} />
-        <meshStandardMaterial color="#8b0000" roughness={0.7} />
-      </mesh>
-      
-      {/* Book 2 - Middle */}
-      <mesh position={[-0.6, 0.85, 0.6]} castShadow>
-        <boxGeometry args={[0.24, 0.04, 0.32]} />
-        <meshStandardMaterial color="#1e3a8a" roughness={0.7} />
-      </mesh>
-      
-      {/* Book 3 - Top */}
-      <mesh position={[-0.6, 0.89, 0.6]} castShadow>
-        <boxGeometry args={[0.26, 0.04, 0.30]} />
-        <meshStandardMaterial color="#065f46" roughness={0.7} />
-      </mesh>
-      
-      {/* Book 4 - Leaning */}
-      <mesh position={[-0.45, 0.83, 0.6]} rotation={[0, 0, 0.3]} castShadow>
-        <boxGeometry args={[0.22, 0.04, 0.30]} />
-        <meshStandardMaterial color="#78350f" roughness={0.7} />
-      </mesh>
-      
-      {/* ===== LAPTOP ON DESK ===== */}
-      {/* Laptop base */}
-      <mesh position={[0.15, 0.80, 0.45]} castShadow>
-        <boxGeometry args={[0.4, 0.02, 0.28]} />
-        <meshStandardMaterial color="#1e293b" metalness={0.6} />
-      </mesh>
-      
-      {/* Laptop screen */}
-      <mesh position={[0.15, 0.96, 0.32]} rotation={[-0.25, 0, 0]} castShadow>
-        <boxGeometry args={[0.4, 0.3, 0.015]} />
-        <meshStandardMaterial color="#1e293b" metalness={0.6} />
-      </mesh>
-      
-      {/* Laptop screen display */}
-      <mesh position={[0.15, 0.96, 0.315]} rotation={[-0.25, 0, 0]}>
-        <planeGeometry args={[0.36, 0.26]} />
-        <meshBasicMaterial color="#3b82f6" />
-      </mesh>
-      
-      {/* ===== COFFEE MUG ===== */}
-      <mesh position={[0.65, 0.82, 0.55]} castShadow>
-        <cylinderGeometry args={[0.04, 0.04, 0.08, 16]} />
-        <meshStandardMaterial color="#7f1d1d" roughness={0.3} />
-      </mesh>
-      
-      {/* Coffee inside */}
-      <mesh position={[0.65, 0.85, 0.55]}>
-        <cylinderGeometry args={[0.038, 0.038, 0.01, 16]} />
-        <meshStandardMaterial color="#3e2723" />
-      </mesh>
-      
-      {/* ===== CHAIR (CANDIDATE) ===== */}
-      <mesh position={[0, 0.52, -0.15]} castShadow receiveShadow>
-        <boxGeometry args={[0.8, 0.08, 0.7]} />
-        <meshStandardMaterial color="#2d3748" roughness={0.5} metalness={0.4} />
-      </mesh>
-      
-      <mesh position={[0, 0.95, -0.45]} castShadow>
-        <boxGeometry args={[0.8, 0.9, 0.08]} />
-        <meshStandardMaterial color="#2d3748" roughness={0.5} metalness={0.4} />
-      </mesh>
-      
-      {/* ===== WINDOW ON SIDE WALL ===== */}
-      {/* ===== REALISTIC WINDOW (recess + trim + sill + glass) ===== */}
-<group position={[-3.5, 2.0, 0]} rotation={[0, Math.PI / 2, 0]}>
-  {/* Wall recess (dark hole behind the window) */}
-  <mesh position={[0, 0, -0.06]} receiveShadow>
-    <boxGeometry args={[2.05, 1.55, 0.02]} />
-    <meshStandardMaterial color="#0b1220" roughness={1} />
-  </mesh>
-
-  {/* Outer trim frame (thicker) */}
-  <mesh castShadow>
-    <boxGeometry args={[2.1, 1.6, 0.12]} />
-    <meshStandardMaterial color="#1f2a3a" roughness={0.35} metalness={0.4} />
-  </mesh>
-
-  {/* Inner frame (creates depth so it doesn't look floating) */}
-  <mesh position={[0, 0, 0.06]} castShadow>
-    <boxGeometry args={[1.95, 1.45, 0.06]} />
-    <meshStandardMaterial color="#2c3e50" roughness={0.45} metalness={0.25} />
-  </mesh>
-
-  {/* Window sill */}
-  <mesh position={[0, -0.85, 0.12]} castShadow>
-    <boxGeometry args={[2.2, 0.12, 0.25]} />
-    <meshStandardMaterial color="#2b2f38" roughness={0.6} metalness={0.1} />
-  </mesh>
-
-  {/* Glass (single plane, slightly reflective) */}
-  <mesh position={[0, 0, 0.095]}>
-    <planeGeometry args={[1.85, 1.35]} />
-    <meshPhysicalMaterial
-      transparent
-      opacity={0.22}
-      roughness={0.06}
-      metalness={0}
-      transmission={0.9}     // glass feel
-      thickness={0.2}
-      ior={1.45}
-      clearcoat={1}
-      clearcoatRoughness={0.05}
-      color="#b7d7ff"
-    />
-  </mesh>
-
-  {/* Cross bars (thin) */}
-  <mesh position={[0, 0, 0.11]} castShadow>
-    <boxGeometry args={[1.85, 0.03, 0.02]} />
-    <meshStandardMaterial color="#0f172a" roughness={0.6} />
-  </mesh>
-  <mesh position={[0, 0, 0.11]} rotation={[0, 0, Math.PI / 2]} castShadow>
-    <boxGeometry args={[1.35, 0.03, 0.02]} />
-    <meshStandardMaterial color="#0f172a" roughness={0.6} />
-  </mesh>
-
-  {/* Subtle “outside light” so it looks like daylight coming in */}
-  <rectAreaLight
-    intensity={1.2}
-    width={1.6}
-    height={1.1}
-    position={[0, 0, 0.16]}
-  />
-</group>
-      
-      {/* ===== POTTED PLANT ===== */}
-      {/* Pot */}
-      <mesh position={[-2.2, 0.125, -1.5]} castShadow>
-        <cylinderGeometry args={[0.15, 0.18, 0.25, 16]} />
-        <meshStandardMaterial color="#8b4513" roughness={0.8} />
-      </mesh>
-      
-      {/* Soil */}
-      <mesh position={[-2.2, 0.25, -1.5]}>
-        <cylinderGeometry args={[0.14, 0.14, 0.01, 16]} />
-        <meshStandardMaterial color="#4a2511" />
-      </mesh>
-      
-      {/* Plant leaves (5 leaves) */}
-      {[...Array(5)].map((_, i) => {
-        const angle = (i / 5) * Math.PI * 2;
-        const radius = 0.1;
-        return (
-          <mesh 
-            key={`leaf-${i}`} 
-            position={[
-              -2.2 + Math.cos(angle) * radius,
-              0.35 + i * 0.1,
-              -1.5 + Math.sin(angle) * radius
-            ]}
-            rotation={[0, angle, 0]}
-          >
-            <sphereGeometry args={[0.12, 8, 8]} />
-            <meshStandardMaterial color="#2d5016" roughness={0.7} />
-          </mesh>
-        );
-      })}
-      
-      {/* ===== BOOKSHELF ===== */}
-      {/* Shelf structure */}
-      <mesh position={[2.5, 0.75, -1.8]} castShadow>
-        <boxGeometry args={[0.5, 1.5, 0.35]} />
-        <meshStandardMaterial color="#3d2b1f" roughness={0.8} />
-      </mesh>
-      
-      {/* Books on shelf (8 books in 2 rows) */}
-      {[...Array(8)].map((_, i) => {
-        const colors = ["#7f1d1d", "#1e3a8a", "#065f46", "#78350f"];
-        const row = Math.floor(i / 4);
-        const col = i % 4;
-        return (
-          <mesh 
-            key={`shelf-book-${i}`} 
-            position={[
-              2.5 - 0.18 + col * 0.09,
-              0.35 + row * 0.4,
-              -1.8
-            ]}
-            castShadow
-          >
-            <boxGeometry args={[0.07, 0.18, 0.22]} />
-            <meshStandardMaterial color={colors[i % colors.length]} roughness={0.7} />
-          </mesh>
-        );
-      })}
-      
-      {/* ===== WALLS ===== */}
-      {/* Back wall */}
-      <mesh position={[0, 2.5, -4]} receiveShadow>
-        <planeGeometry args={[12, 5]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.9} />
-      </mesh>
-      
-      {/* Left wall */}
-      <mesh position={[-6, 2.5, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[8, 5]} />
-        <meshStandardMaterial color="#141b2d" roughness={0.9} />
-      </mesh>
-      
-      {/* Right wall */}
-      <mesh position={[6, 2.5, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[8, 5]} />
-        <meshStandardMaterial color="#141b2d" roughness={0.9} />
-      </mesh>
-      
-      {/* ===== CEILING LAMP ===== */}
-      <mesh position={[0, 4.5, 0]}>
-        <cylinderGeometry args={[0.15, 0.25, 0.3, 16]} />
-        <meshStandardMaterial color="#fef3c7" emissive="#fef3c7" emissiveIntensity={0.5} />
-      </mesh>
+      {/* Scene objects */}
+      <Floor />
+      <Walls />
+      <Desk />
+      <Chair />
+      <Window />
+      <Bookshelf />
       <WallArt />
-      
-      {/* Avatar */}
+      <PlantPot />
       <Avatar isTalking={isTalking} />
     </>
   );
 }
 
 // ═══════════════════════════════════════════════════════════
-// MAIN APP
+// MAIN SCENE COMPONENT
 // ═══════════════════════════════════════════════════════════
-function App() {
-  const [isTalking, setIsTalking] = useState(false);  // STARTS FALSE = GUARANTEED IDLE
+function Scene3D() {
+  const [isTalking, setIsTalking] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef(null);
 
-
-   useEffect(() => {
+  // Listen for messages from Streamlit parent window
+  useEffect(() => {
     const handleMessage = (event) => {
       if (event.data && event.data.type === 'SET_TALKING') {
-        console.log('📨 Received talking state from Streamlit:', event.data.value);
+        console.log('📨 Received talking state:', event.data.value);
         setIsTalking(event.data.value);
       }
     };
 
     window.addEventListener('message', handleMessage);
-    
-    return () => {
-      window.removeEventListener('message', handleMessage);
-    };
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
-
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -447,37 +431,13 @@ function App() {
     <div 
       ref={containerRef}
       style={{ 
-        width: "100vw", 
-        height: "100vh", 
+        width: "100%", 
+        height: "100%", 
         position: "relative", 
         overflow: "hidden",
         background: "#000"
       }}
     >
-       {!isFullscreen && (
-        <div style={{
-          position: 'absolute',
-          top: '10px',
-          right: '10px',
-          zIndex: 1000,
-          pointerEvents: 'auto'
-        }}>
-          <Link
-      to="/voice"
-      style={{
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        color: "white",
-        padding: "12px 24px",
-        borderRadius: "8px",
-        textDecoration: "none",
-        fontWeight: 600,
-        display: "inline-block",
-      }}
-    >
-      🎙️ Voice Interview
-    </Link>
-        </div>
-      )}
       <Canvas
         shadows
         dpr={[1, 2]}
@@ -492,118 +452,61 @@ function App() {
         <InterviewScene isTalking={isTalking} />
       </Canvas>
 
-      <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
-        
-        {!isFullscreen && (
-          <div style={{ 
-            position: "absolute", 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            height: "70px", 
-            background: "rgba(0,0,0,0.95)", 
-            backdropFilter: "blur(20px)", 
-            display: "flex", 
-            alignItems: "center", 
-            justifyContent: "space-between", 
-            padding: "0 30px",
-            pointerEvents: "auto",
-            borderBottom: "1px solid rgba(255,255,255,0.1)"
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-              <div style={{ 
-                width: "50px", 
-                height: "50px", 
-                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", 
-                borderRadius: "14px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "26px"
-              }}>
-                🎤
-              </div>
-              <div>
-                <h1 style={{ color: "white", fontSize: "22px", fontWeight: "700", margin: 0 }}>
-                  AI-Powered Interview Preparation System
-                </h1>
-                <p style={{ color: "#9ca3af", fontSize: "13px", margin: 0 }}>Professional Office Environment</p>
-              </div>
-            </div>
-            
-            <button
-              onClick={toggleFullscreen}
-              style={{
-                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                color: "white",
-                border: "none",
-                padding: "12px 24px",
-                borderRadius: "8px",
-                fontSize: "15px",
-                fontWeight: "600",
-                cursor: "pointer",
-                boxShadow: "0 4px 12px rgba(102, 126, 234, 0.4)",
-                transition: "transform 0.2s"
-              }}
-              onMouseOver={(e) => e.target.style.transform = "translateY(-2px)"}
-              onMouseOut={(e) => e.target.style.transform = "translateY(0)"}
-            >
-              🖥️ Fullscreen
-            </button>
-          </div>
-        )}
-
-        <div style={{
+      {/* Fullscreen button */}
+      <button
+        onClick={toggleFullscreen}
+        style={{
           position: "absolute",
-          bottom: "20px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "rgba(0,0,0,0.95)",
+          top: "20px",
+          right: "20px",
+          background: "rgba(0,0,0,0.9)",
           backdropFilter: "blur(20px)",
-          padding: "14px 28px",
-          borderRadius: "30px",
-          border: "1px solid rgba(255,255,255,0.15)",
-          pointerEvents: "none",
+          border: "1px solid rgba(255,255,255,0.2)",
+          color: "white",
+          padding: "12px 20px",
+          borderRadius: "8px",
+          fontSize: "14px",
+          fontWeight: "600",
+          cursor: "pointer",
+          pointerEvents: "auto",
+          zIndex: 20,
           display: "flex",
           alignItems: "center",
-          gap: "12px",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.5)"
-        }}>
-          <div style={{
-            width: "14px",
-            height: "14px",
-            borderRadius: "50%",
-            background: isTalking ? "#10b981" : "#6b7280",
-            boxShadow: isTalking ? "0 0 15px #10b981" : "none",
-            animation: isTalking ? "pulse 1.5s infinite" : "none"
-          }} />
-          <span style={{ color: "white", fontSize: "15px", fontWeight: "600" }}>
-            {isTalking ? "🗣️ AI Interviewer Speaking" : "💺 Ready for Interview"}
-          </span>
-        </div>
+          gap: "8px"
+        }}
+      >
+        {isFullscreen ? "✕ Exit Fullscreen" : "⛶ Fullscreen"}
+      </button>
 
-        {isFullscreen && (
-          <button
-            onClick={toggleFullscreen}
-            style={{
-              position: "absolute",
-              top: "20px",
-              right: "20px",
-              background: "rgba(0,0,0,0.9)",
-              border: "1px solid rgba(255,255,255,0.2)",
-              color: "white",
-              padding: "12px 20px",
-              borderRadius: "8px",
-              fontSize: "16px",
-              fontWeight: "600",
-              cursor: "pointer",
-              pointerEvents: "auto"
-            }}
-          >
-            ✕ Exit
-          </button>
-        )}
-
+      {/* Status indicator */}
+      <div style={{
+        position: "absolute",
+        bottom: "20px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "rgba(0,0,0,0.95)",
+        backdropFilter: "blur(20px)",
+        padding: "14px 28px",
+        borderRadius: "30px",
+        border: "1px solid rgba(255,255,255,0.15)",
+        pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+        zIndex: 10
+      }}>
+        <div style={{
+          width: "14px",
+          height: "14px",
+          borderRadius: "50%",
+          background: isTalking ? "#10b981" : "#6b7280",
+          boxShadow: isTalking ? "0 0 15px #10b981" : "none",
+          animation: isTalking ? "pulse 1.5s infinite" : "none"
+        }} />
+        <span style={{ color: "white", fontSize: "15px", fontWeight: "600" }}>
+          {isTalking ? "🗣️ AI Interviewer Speaking" : "💺 Ready for Interview"}
+        </span>
       </div>
 
       <style>{`
@@ -616,8 +519,9 @@ function App() {
   );
 }
 
+// Preload assets
 useGLTF.preload("/character.glb");
 useGLTF.preload("/animations/Sitting.glb");
 useGLTF.preload("/animations/Talking.glb");
 
-export default App; 
+export default Scene3D;
