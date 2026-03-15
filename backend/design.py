@@ -1042,7 +1042,14 @@ def render_home_page():
 
 def render_resume_page(job_role):
     """FIXED: Clean Resume Analysis page - NO raw data display"""
-    from app import parse_resume, calculate_resume_score
+    from app import (
+        parse_resume,
+        calculate_resume_score,
+        generate_backend_recommendations,
+        normalize_resume_text,
+        _has_keyword,
+        ROLE_SKILL_PRIORITIES
+    )
     
     st.title("📄 Resume Analysis")
     st.caption("AI-powered ATS scoring and skill matching")
@@ -1069,18 +1076,23 @@ def render_resume_page(job_role):
                     st.balloons()
                     st.rerun()
     
-    if st.session_state.resume_text and st.session_state.resume_skills:
+    if st.session_state.resume_text:
         st.markdown("---")
-        
+
         current_score = calculate_resume_score(
             st.session_state.resume_text,
             st.session_state.resume_skills,
             st.session_state.resume_experience,
             job_role
         )
-        
+
+        role_keywords = ROLE_SKILL_PRIORITIES.get(job_role, ROLE_SKILL_PRIORITIES['Backend Developer'])
+        missing_keywords = sorted(
+            [k for k in role_keywords.get('must', []) if not _has_keyword(normalize_resume_text(st.session_state.resume_text), k)]
+        )
+
+        # show main metrics
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
             st.markdown(f"""
             <div class='metric-card'>
@@ -1088,7 +1100,7 @@ def render_resume_page(job_role):
                 <div class='metric-value'>{current_score}%</div>
             </div>
             """, unsafe_allow_html=True)
-        
+
         with col2:
             total_skills = sum(len(skills) for skills in st.session_state.resume_skills.values())
             st.markdown(f"""
@@ -1097,7 +1109,7 @@ def render_resume_page(job_role):
                 <div class='metric-value'>{total_skills}</div>
             </div>
             """, unsafe_allow_html=True)
-        
+
         with col3:
             exp_text = f"{st.session_state.resume_experience}" if st.session_state.resume_experience > 0 else "N/A"
             st.markdown(f"""
@@ -1106,9 +1118,9 @@ def render_resume_page(job_role):
                 <div class='metric-value'>{exp_text} yrs</div>
             </div>
             """, unsafe_allow_html=True)
-        
+
         with col4:
-            status = "Excellent" if current_score >= 80 else "Good" if current_score >= 60 else "Improve"
+            status = "Excellent" if current_score >= 80 else "Good" if current_score >= 60 else "Needs Improvement"
             status_color = "#10b981" if current_score >= 80 else "#f59e0b" if current_score >= 60 else "#ef4444"
             st.markdown(f"""
             <div class='metric-card'>
@@ -1116,46 +1128,47 @@ def render_resume_page(job_role):
                 <div class='metric-value' style='color: {status_color};'>{status}</div>
             </div>
             """, unsafe_allow_html=True)
-        
+
         st.markdown("---")
-        
+
         if st.session_state.resume_skills:
             st.subheader("🛠️ Technical Skills")
-            
-            for category, skills_list in st.session_state.resume_skills.items():
-                if skills_list:
-                    st.markdown(f"**{category}:**")
-                    
-                    badges_html = ""
-                    for skill in skills_list:
-                        badges_html += f"<span class='skill-badge'>{skill}</span>"
-                    
-                    st.markdown(badges_html, unsafe_allow_html=True)
-                    st.markdown("<br>", unsafe_allow_html=True)
+            aggregate = []
+            for category in sorted(st.session_state.resume_skills):
+                skills = sorted(st.session_state.resume_skills[category], key=lambda s: s.lower())
+                aggregate.extend(skills)
+                st.markdown(f"**{category}:**")
+                badges_html = ""
+                for skill in skills:
+                    badges_html += f"<span class='skill-badge'>{skill}</span>"
+                st.markdown(badges_html, unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+            if not aggregate:
+                st.info("💡 No technical skills detected. Add more keywords to your resume.")
         else:
             st.info("💡 No technical skills detected. Add more keywords to your resume.")
-        
+
         st.markdown("---")
-        
-        st.subheader("🎯 Recommendations")
-        
-        col_left, col_right = st.columns(2)
-        
-        with col_left:
-            if current_score < 80:
-                st.markdown("**Missing Keywords:**")
-                missing_keywords = ["Docker", "Testing", "CI/CD", "Cloud"]
-                missing_html = ""
-                for keyword in missing_keywords[:4]:
-                    missing_html += f"<span class='missing-badge'>{keyword}</span>"
-                st.markdown(missing_html, unsafe_allow_html=True)
-        
-        with col_right:
-            st.markdown("**Quick Wins:**")
-            st.write("• Add quantified achievements")
-            st.write("• Include certifications")
-            st.write("• Use action verbs")
-    
+        st.subheader("🎯 Backend ATS Insights")
+
+        st.markdown("**Missing Keywords (sorted):**")
+        if missing_keywords:
+            missing_html = "".join([f"<span class='missing-badge'>{kw.title()}</span>" for kw in missing_keywords])
+            st.markdown(missing_html, unsafe_allow_html=True)
+        else:
+            st.success("✅ All must-have keywords for this role are present.")
+
+        recommendations = generate_backend_recommendations(
+            st.session_state.resume_text,
+            st.session_state.resume_skills,
+            job_role
+        )
+        st.markdown("**Recommendations:**")
+        for rec in recommendations:
+            st.write(f"• {rec}")
+
+        st.markdown("---")
+
     else:
         st.info("👆 Upload your resume to get started")
         

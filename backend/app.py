@@ -295,108 +295,329 @@ def keyword_rubric_evaluate(answer, keywords):
 # RESUME PROCESSING
 # ═══════════════════════════════════════════════════════════
 
+def normalize_resume_text(text):
+    """Normalize resume text to deterministic lowercase and collapsed spacing."""
+    if not text:
+        return ""
+    normalized = text.replace("\r", "\n").lower()
+    normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9\s\+\-\.#/\\]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+def extract_experience(text):
+    normalized = normalize_resume_text(text)
+    match = re.search(r"(\d+)\+?\s*years?\s+(?:of\s+)?experience", normalized)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"experience:\s*(\d+)", normalized)
+    return int(match.group(1)) if match else 0
+
+# Enhanced deterministic skill database with categories and aliases
+SKILL_CATEGORIES = {
+    'Programming': [
+        'python', 'java', 'c', 'c++', 'c#', 'javascript', 'typescript', 'go', 'ruby'
+    ],
+    'Frontend': [
+        'html', 'css', 'react', 'vue', 'angular', 'svelte', 'next.js', 'tailwind'
+    ],
+    'Backend': [
+        'flask', 'fastapi', 'django', 'node.js', 'express', 'rest api', 'restful api',
+        'jwt', 'authentication', 'authorization', 'mvc', 'microservices', 'api development'
+    ],
+    'Database': [
+        'sql', 'mysql', 'postgresql', 'postgres', 'mongodb', 'sqlite', 'redis', 'oracle', 'sqlalchemy', 'sqlmodel', 'orm'
+    ],
+    'Tools': [
+        'git', 'github', 'vs code', 'vscode', 'postman', 'intellij', 'jira', 'docker', 'linux'
+    ],
+    'Cloud': [
+        'aws', 'gcp', 'azure', 'cloud', 'kubernetes', 'ecs', 'eks', 'gke', 'docker'
+    ],
+    'DevOps': [
+        'ci/cd', 'cicd', 'continuous integration', 'continuous delivery', 'github actions', 'jenkins', 'terraform', 'ansible', 'docker compose'
+    ],
+    'Testing': [
+        'unit testing', 'integration testing', 'api testing', 'pytest', 'unittest', 'junit', 'mocha', 'jest', 'cypress'
+    ],
+    'Concepts': [
+        'data structures', 'algorithms', 'oop', 'design patterns', 'rest api', 'microservices', 'api design'
+    ]
+}
+
+SKILL_CANONICAL = {
+    'js': 'javascript',
+    'node': 'node.js',
+    'nodejs': 'node.js',
+    'restful api': 'rest api',
+    'restapi': 'rest api',
+    'jwt authentication': 'jwt',
+    'jwt auth': 'jwt',
+    'github actions': 'ci/cd',
+    'continuous integration': 'ci/cd',
+    'continuous delivery': 'ci/cd',
+    'cicd': 'ci/cd',
+    'mysql': 'mysql',
+    'postgres': 'postgresql',
+    'postgre': 'postgresql',
+    'tf': 'tensorflow',
+    'sklearn': 'scikit-learn',
+    'fast api': 'fastapi',
+    'restful': 'rest api'
+}
+
+ROLE_SKILL_PRIORITIES = {
+    'Backend Developer': {
+        'must': ['python', 'sql', 'api', 'database'],
+        'preferred': ['flask', 'fastapi', 'django', 'node.js', 'express', 'postgresql', 'mongodb', 'rest api', 'jwt', 'authentication'],
+        'tools': ['git', 'github', 'docker', 'postman', 'ci/cd', 'kubernetes'],
+        'min_experience': 2
+    },
+    'Frontend Developer': {
+        'must': ['javascript', 'html', 'css', 'react'],
+        'preferred': ['typescript', 'vue', 'angular'],
+        'tools': ['git', 'github', 'webpack'],
+        'min_experience': 1
+    },
+    'Data Scientist': {
+        'must': ['python', 'machine learning', 'statistics', 'sql'],
+        'preferred': ['pandas', 'numpy', 'scikit-learn', 'tensorflow', 'pytorch'],
+        'tools': ['git', 'cloud'],
+        'min_experience': 2
+    },
+    'ML Engineer': {
+        'must': ['python', 'machine learning', 'docker'],
+        'preferred': ['tensorflow', 'pytorch', 'mlops', 'kubernetes'],
+        'tools': ['git', 'ci/cd'],
+        'min_experience': 2
+    },
+    'Full Stack Developer': {
+        'must': ['javascript', 'python', 'sql', 'react'],
+        'preferred': ['node.js', 'django', 'postgresql'],
+        'tools': ['git', 'docker', 'ci/cd'],
+        'min_experience': 2
+    },
+    'DevOps Engineer': {
+        'must': ['linux', 'docker', 'ci/cd'],
+        'preferred': ['kubernetes', 'aws', 'azure', 'terraform', 'ansible'],
+        'tools': ['git', 'monitoring'],
+        'min_experience': 2
+    }
+}
+
+def _normalize_skill_keyword(keyword):
+    if not keyword:
+        return ""
+    normalized = keyword.lower().strip()
+    normalized = normalized.replace("-", " ")
+    normalized = normalized.replace("/", " ")
+    normalized = normalized.replace(".", " ")
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = SKILL_CANONICAL.get(normalized, normalized)
+    return normalized
+
+def _has_keyword(normalized_text, keyword):
+    k = _normalize_skill_keyword(keyword)
+    pattern = r"\b" + re.escape(k) + r"\b"
+    return bool(re.search(pattern, normalized_text))
+
+def extract_skills_deterministic(text):
+    normalized = normalize_resume_text(text)
+    found = {}
+    canonical_found = set()
+
+    # find every keyword from category lists and aliases
+    for category, keywords in SKILL_CATEGORIES.items():
+        found[category] = []
+        for keyword in keywords:
+            normalized_keyword = _normalize_skill_keyword(keyword)
+            if normalized_keyword in canonical_found:
+                continue
+            if _has_keyword(normalized, normalized_keyword):
+                canonical_found.add(normalized_keyword)
+                found[category].append(keyword.title() if keyword.islower() else keyword)
+
+    # also detect alias keywords not in category lists
+    for alias, canonical in SKILL_CANONICAL.items():
+        normalized_canonical = _normalize_skill_keyword(canonical)
+        if normalized_canonical in canonical_found:
+            continue
+        if _has_keyword(normalized, alias):
+            canonical_found.add(normalized_canonical)
+            # map canonical to category
+            for category, keywords in SKILL_CATEGORIES.items():
+                if canonical in keywords or normalized_canonical in [_normalize_skill_keyword(k) for k in keywords]:
+                    found.setdefault(category, []).append(canonical.title())
+                    break
+
+    # remove duplicates and sort stable
+    for category in found.keys():
+        found[category] = sorted(set(found[category]), key=lambda x: x.lower())
+    # drop empty categories
+    return {cat: skills for cat, skills in found.items() if skills}
+
+def _extract_section_match(text, section_keywords):
+    normalized = normalize_resume_text(text)
+    for kw in section_keywords:
+        if _has_keyword(normalized, kw):
+            return True
+    return False
+
+def _extract_score_components(resume_text, detected_skills, job_role):
+    norm = normalize_resume_text(resume_text)
+    role_profile = ROLE_SKILL_PRIORITIES.get(job_role, ROLE_SKILL_PRIORITIES['Backend Developer'])
+
+    # Technical presence
+    must = role_profile.get('must', [])
+    preferred = role_profile.get('preferred', [])
+    bonus = role_profile.get('tools', [])
+
+    must_matches = sum(1 for s in must if _has_keyword(norm, s))
+    pref_matches = sum(1 for s in preferred if _has_keyword(norm, s))
+    bonus_matches = sum(1 for s in bonus if _has_keyword(norm, s))
+
+    technical_ratio = (
+        (must_matches / max(1, len(must))) * 0.7
+        + (pref_matches / max(1, len(preferred))) * 0.2
+        + (bonus_matches / max(1, len(bonus))) * 0.1
+    )
+    technical_score = round(40 * min(1.0, technical_ratio), 2)
+
+    project_section = _extract_section_match(resume_text, ['project', 'projects'])
+    project_keywords = [k for k in preferred + must if _has_keyword(norm, k)]
+    project_relevance = 0.0
+    if project_section:
+        project_relevance = min(1.0, len(project_keywords) / max(1, len(must + preferred)))
+    project_score = round(20 * project_relevance, 2)
+
+    internship_section = _extract_section_match(resume_text, ['intern', 'internship'])
+    exp_score = 0
+    if internship_section:
+        exp_score = 12
+    exp_score += 3 if _extract_section_match(resume_text, ['experience']) else 0
+    exp_score = min(15, exp_score)
+
+    backend_project_mentions = sum(1 for k in [ 'flask', 'fastapi', 'django', 'node.js', 'express', 'rest api', 'jwt', 'mysql', 'postgresql', 'mongodb', 'docker', 'ci/cd' ] if _has_keyword(norm, k))
+    backend_project_score = min(10, backend_project_mentions * 2)
+
+    tool_devops_matches = sum(1 for k in ['docker', 'ci/cd', 'github actions', 'kubernetes', 'terraform', 'ansible', 'postman'] if _has_keyword(norm, k))
+    tool_devops_score = min(10, tool_devops_matches * 2)
+
+    completeness = 0
+    if _extract_section_match(resume_text, ['summary', 'profile']):
+        completeness += 2
+    if _extract_section_match(resume_text, ['skills']):
+        completeness += 1
+    if _extract_section_match(resume_text, ['projects']):
+        completeness += 1
+    if _extract_section_match(resume_text, ['education']):
+        completeness += 1
+    completeness_score = min(5, completeness)
+
+    return {
+        'technical_score': technical_score,
+        'project_score': project_score,
+        'experience_score': exp_score,
+        'backend_project_score': backend_project_score,
+        'tool_devops_score': tool_devops_score,
+        'completeness_score': completeness_score,
+        'detailed': {
+            'must_matches': must_matches,
+            'preferred_matches': pref_matches,
+            'bonus_matches': bonus_matches,
+            'project_section': project_section,
+            'internship_section': internship_section,
+        }
+    }
+
+
+def generate_backend_recommendations(resume_text, detected_skills, job_role):
+    normalized = normalize_resume_text(resume_text)
+    role_profile = ROLE_SKILL_PRIORITIES.get(job_role, ROLE_SKILL_PRIORITIES['Backend Developer'])
+    must = role_profile.get('must', [])
+    preferred = role_profile.get('preferred', [])
+    recommendations = []
+
+    missing = [s for s in must if not _has_keyword(normalized, s)]
+    missing += [s for s in preferred if not _has_keyword(normalized, s)]
+
+    if 'docker' in missing:
+        recommendations.append('Add Docker/containerization and a deployment bullet in your project section.')
+    if any(k in missing for k in ['ci/cd', 'github actions', 'continuous integration']):
+        recommendations.append('Include CI/CD workflow (GitHub Actions, Jenkins, or Terraform pipeline) in your projects or experience.')
+    if any(k in missing for k in ['unit testing', 'api testing', 'integration testing']):
+        recommendations.append('Mention unit/API/integration tests and test suites for your backend work.')
+    if 'rest api' in missing or 'jwt' in missing:
+        recommendations.append('Describe API design and authentication (JWT/OAuth) in a backend project bullet.')
+    if not _extract_section_match(resume_text, ['summary', 'profile']):
+        recommendations.append('Add a concise backend-focused summary highlighting Python, APIs, and databases.')
+    if not _extract_section_match(resume_text, ['projects']):
+        recommendations.append('Add a dedicated Backend Projects section with tech stack and outcomes.')
+
+    if not recommendations:
+        recommendations.append('Your resume looks strong. Add more quantifiable impact statements to improve further.')
+
+    return recommendations
+
+
+def validate_score_stability(resume_text, job_role, repeats=3):
+    scores = [calculate_resume_score(resume_text, extract_skills_deterministic(resume_text), extract_experience(resume_text), job_role) for _ in range(repeats)]
+    if len(set(scores)) > 1:
+        return False, scores
+    return True, scores[0]
+
+
+def format_skills_for_ui(skills_dict):
+    formatted = []
+    for cat in sorted(skills_dict):
+        skills = sorted(skills_dict[cat], key=lambda s: s.lower())
+        formatted.extend(skills)
+    return formatted
+
+
 def parse_resume(uploaded_file):
     try:
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
-        text = "".join([page.extract_text() for page in pdf_reader.pages])
-        return text, extract_skills(text), extract_experience(text)
+        raw_bytes = uploaded_file.read()
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(raw_bytes))
+        text = "\n".join([page.extract_text() or "" for page in pdf_reader.pages])
+        normalized_text = normalize_resume_text(text)
+        detected_skills = extract_skills_deterministic(normalized_text)
+        experience = extract_experience(normalized_text)
+        return text, detected_skills, experience
     except Exception as e:
         st.error(f"Failed to parse resume: {str(e)}")
         return "", {}, 0
 
-def extract_skills(text):
-    skill_keywords = {
-        'Programming': ['python', 'javascript', 'java', 'c++', 'sql', 'typescript'],
-        'ML/AI': ['machine learning', 'tensorflow', 'pytorch', 'scikit-learn'],
-        'Web': ['react', 'angular', 'vue', 'node.js', 'django', 'flask'],
-        'Cloud': ['aws', 'azure', 'gcp', 'docker', 'kubernetes'],
-        'Data': ['pandas', 'numpy', 'spark', 'hadoop', 'mongodb', 'postgresql'],
-        'Tools': ['git', 'jenkins', 'linux', 'ci/cd', 'terraform']
-    }
-    found_skills = {}
-    text_lower = text.lower()
-    for category, skills in skill_keywords.items():
-        found = [skill.title() for skill in skills if skill in text_lower]
-        if found:
-            found_skills[category] = found
-    return found_skills
 
-def extract_experience(text):
-    match = re.search(r'(\d+)\+?\s*years?\s+(?:of\s+)?experience', text.lower())
-    return int(match.group(1)) if match else 0
+def calculate_resume_score(resume_text, skills, experience, job_role, debug=False):
+    normalized = normalize_resume_text(resume_text)
+    if not job_role:
+        job_role = 'Backend Developer'
+    detected_skills = skills if isinstance(skills, dict) and skills else extract_skills_deterministic(resume_text)
 
-def normalize_text(s):
-    s = (s or "").lower()
-    s = s.replace("&", " and ")
-    s = re.sub(r"[^a-z0-9\.\+\-\s/]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return f" {s} "
+    # Stable, weighted formula
+    components = _extract_score_components(resume_text, detected_skills, job_role)
+    total_score = (
+        components['technical_score'] +
+        components['project_score'] +
+        components['experience_score'] +
+        components['backend_project_score'] +
+        components['tool_devops_score'] +
+        components['completeness_score']
+    )
+    final_score = int(max(0, min(100, round(total_score))))
 
-def skill_present(text, skill):
-    skill_n = normalize_text(skill).strip()
-    if f" {skill_n} " in text:
-        return True
-    for alias in SKILL_ALIASES.get(skill_n, []):
-        if f" {normalize_text(alias).strip()} " in text:
-            return True
-    return False
-
-def calculate_resume_score(resume_text, skills, experience, job_role):
-    """Calculate role-aware resume score (15-92 range)"""
-    requirements = ROLE_REQUIRED_SKILLS.get(job_role, {
-        "must_have": ["programming"], "preferred": [], "bonus": [], "min_experience": 1
-    })
-    all_resume_skills = []
-    if isinstance(skills, dict):
-        for _, skill_list in skills.items():
-            if isinstance(skill_list, list):
-                all_resume_skills.extend([str(s) for s in skill_list if s])
-    
-    resume_text = normalize_text(resume_text)
-    score = 0
-    
-    # Must-have skills (max 44 points)
-    must_have = requirements["must_have"]
-    must_found = sum(1 for sk in must_have if skill_present(resume_text, sk))
-    must_ratio = must_found / len(must_have) if len(must_have) > 0 else 0.0
-    must_score = int(44 * must_ratio) - (len(must_have) - must_found) * 6
-    score += max(0, must_score)
-    
-    # Preferred & bonus
-    pref_found = sum(1 for sk in requirements["preferred"] if skill_present(resume_text, sk))
-    score += min(28, pref_found * 4)
-    bonus_found = sum(1 for sk in requirements["bonus"] if skill_present(resume_text, sk))
-    score += min(10, bonus_found * 2)
-    
-    # Experience
-    exp = max(0, int(experience or 0))
-    min_exp = int(requirements.get("min_experience", 1))
-    if exp >= min_exp + 4:
-        score += 18
-    elif exp >= min_exp + 2:
-        score += 15
-    elif exp >= min_exp:
-        score += 12
-    elif exp == max(min_exp - 1, 0):
-        score += 9
-    else:
-        score += 6
-    
-    # Completeness bonus
-    if len(all_resume_skills) >= 12:
-        score += 6
-    elif len(all_resume_skills) >= 8:
-        score += 4
-    elif len(all_resume_skills) >= 4:
-        score += 2
-    
-    # Deterministic jitter
-    seed_str = f"{job_role}|{exp}|{'|'.join(sorted([s.lower() for s in all_resume_skills]))}"
-    h = hashlib.md5(seed_str.encode("utf-8")).hexdigest()
-    jitter = (int(h[:2], 16) % 5) - 2
-    score += jitter
-    
-    return int(max(15, min(92, score)))
+    if debug:
+        return {
+            'score': final_score,
+            'components': components,
+            'skills': detected_skills,
+            'missing': sorted(set([
+                s for s in ROLE_SKILL_PRIORITIES.get(job_role, {}).get('must', [])
+                if not _has_keyword(normalized, s)
+            ])),
+        }
+    return final_score
 
 # ═══════════════════════════════════════════════════════════
 # QUESTION GENERATION
