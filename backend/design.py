@@ -97,9 +97,15 @@ def get_current_user() -> dict:
 
 def logout_user():
     """Logout current user"""
-    st.session_state.logged_in = False
-    st.session_state.user = None
-    st.session_state.page = 'login'
+    # Safely clear any existing auth/session flags
+    if 'logged_in' in st.session_state:
+        del st.session_state['logged_in']
+    if 'user' in st.session_state:
+        del st.session_state['user']
+    # Keep a consistent page key
+    st.session_state['page'] = 'login'
+    st.session_state['logged_in'] = False
+    st.session_state['user'] = None
 
 # ═══════════════════════════════════════════════════════════
 # AUTHENTICATION UI PAGES
@@ -1749,7 +1755,7 @@ def render_progress_page():
                 if st.button("Delete Session", key=f"delete_{selected_session}"):
                     if delete_session(selected_session):
                         st.success("Session deleted.")
-                        st.experimental_rerun()
+                        st.rerun()
 
             st.markdown("---")
             for i, q in enumerate(session_data.get('questions', []), start=1):

@@ -1014,7 +1014,8 @@ def main():
     st.sidebar.write(f"👤 Logged in as: **{user_name}**")
     if st.sidebar.button("Logout"):
         logout_user()
-        st.experimental_rerun()
+        st.success("✅ Logged out successfully")
+        st.rerun()
 
     page = st.sidebar.radio("Go to", ["🏠 Home", "📄 Resume", "🎤 Interview", "📊 Results", "📈 Progress"])
     
