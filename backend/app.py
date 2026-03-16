@@ -129,19 +129,51 @@ from design import ROLE_QUESTION_BANK, ROLE_VALIDATION_KEYWORDS
 # DATABASE OPERATIONS
 # ═══════════════════════════════════════════════════════════
 
+def _ensure_column(cursor, table_name, column_defs):
+    for col_name, col_type, default in column_defs:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        existing = [row[1] for row in cursor.fetchall()]
+        if col_name not in existing:
+            add_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"
+            if default is not None:
+                add_sql += f" DEFAULT {default}"
+            cursor.execute(add_sql)
+
+
 def init_database():
-    """Initialize SQLite database with proper schema"""
+    """Initialize SQLite database with proper schema and migrations"""
     with sqlite3.connect('interview_memory.db') as conn:
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS conversations
                      (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, timestamp DATETIME,
                       question TEXT, answer TEXT, category TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS sessions
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT UNIQUE, job_role TEXT,
-                      difficulty TEXT, mode TEXT, overall_score REAL, completed_at DATETIME)''')
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT UNIQUE,
+                      user_id INTEGER, job_role TEXT, difficulty TEXT, mode TEXT,
+                      overall_score REAL, question_count INTEGER, avg_time REAL,
+                      session_date DATETIME, session_feedback TEXT,
+                      details_json TEXT, completed_at DATETIME)''')
         c.execute('''CREATE TABLE IF NOT EXISTS performance
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, question TEXT, answer TEXT,
-                      score INTEGER, rubric_scores TEXT, feedback TEXT, time_taken INTEGER)''')
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, question TEXT,
+                      answer TEXT, score INTEGER, rubric_scores TEXT, feedback TEXT,
+                      strengths TEXT, improvements TEXT, ideal_answer TEXT,
+                      missing_keywords TEXT, rewritten_answer TEXT, time_taken INTEGER)''')
+        # ensure migration columns exist
+        _ensure_column(c, 'sessions', [
+            ('user_id', 'INTEGER', 'NULL'),
+            ('question_count', 'INTEGER', 'NULL'),
+            ('avg_time', 'REAL', 'NULL'),
+            ('session_date', 'DATETIME', 'NULL'),
+            ('session_feedback', 'TEXT', 'NULL'),
+            ('details_json', 'TEXT', 'NULL'),
+        ])
+        _ensure_column(c, 'performance', [
+            ('strengths', 'TEXT', 'NULL'),
+            ('improvements', 'TEXT', 'NULL'),
+            ('ideal_answer', 'TEXT', 'NULL'),
+            ('missing_keywords', 'TEXT', 'NULL'),
+            ('rewritten_answer', 'TEXT', 'NULL'),
+        ])
         conn.commit()
 
 init_database()
@@ -157,40 +189,105 @@ def save_conversation(session_id, question, answer, category):
     except Exception as e:
         st.warning(f"Failed to save conversation: {str(e)}")
 
-def save_session(session_id, job_role, difficulty, mode, overall_score):
+def save_session(session_id, job_role, difficulty, mode, overall_score, question_count=0, avg_time=0, session_feedback='', details_json=''):
+    user = st.session_state.get('user', {}) or {}
+    user_id = user.get('id')
     try:
         with sqlite3.connect('interview_memory.db') as conn:
             c = conn.cursor()
-            c.execute('''INSERT OR REPLACE INTO sessions 
-                         (session_id, job_role, difficulty, mode, overall_score, completed_at)
-                         VALUES (?, ?, ?, ?, ?, ?)''',
-                      (session_id, job_role, difficulty, mode, overall_score, datetime.now()))
+            c.execute('''INSERT OR REPLACE INTO sessions
+                         (session_id, user_id, job_role, difficulty, mode, overall_score,
+                          question_count, avg_time, session_date, session_feedback, details_json, completed_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (session_id, user_id, job_role, difficulty, mode, overall_score,
+                       question_count, avg_time, datetime.now(), session_feedback, details_json, datetime.now()))
             conn.commit()
     except Exception as e:
         st.warning(f"Failed to save session: {str(e)}")
 
-def save_performance(session_id, question, answer, score, rubric_scores, feedback, time_taken):
+def save_performance(session_id, question, answer, score, rubric_scores, feedback, time_taken,
+                     strengths=None, improvements=None, ideal_answer=None, missing_keywords=None,
+                     rewritten_answer=None):
     try:
         with sqlite3.connect('interview_memory.db') as conn:
             c = conn.cursor()
-            c.execute('''INSERT INTO performance 
-                         (session_id, question, answer, score, rubric_scores, feedback, time_taken)
-                         VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                      (session_id, question, answer, score, json.dumps(rubric_scores), feedback, time_taken))
+            c.execute('''INSERT INTO performance
+                         (session_id, question, answer, score, rubric_scores, feedback,
+                          strengths, improvements, ideal_answer, missing_keywords,
+                          rewritten_answer, time_taken)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (session_id, question, answer, score, json.dumps(rubric_scores), feedback,
+                       json.dumps(strengths or []), json.dumps(improvements or []), json.dumps(ideal_answer or []),
+                       json.dumps(missing_keywords or []), rewritten_answer or '', time_taken))
             conn.commit()
     except Exception as e:
         st.warning(f"Failed to save performance: {str(e)}")
 
-def load_session_history():
+def load_session_history(user_id=None):
     try:
         with sqlite3.connect('interview_memory.db') as conn:
             c = conn.cursor()
-            c.execute('''SELECT session_id, job_role, difficulty, overall_score, completed_at 
-                         FROM sessions ORDER BY completed_at DESC''')
-            return c.fetchall()
+            if user_id:
+                c.execute('''SELECT session_id, job_role, difficulty, mode, overall_score, question_count, avg_time, session_date, session_feedback, details_json
+                             FROM sessions WHERE user_id = ? ORDER BY session_date DESC''', (user_id,))
+            else:
+                c.execute('''SELECT session_id, job_role, difficulty, mode, overall_score, question_count, avg_time, session_date, session_feedback, details_json
+                             FROM sessions ORDER BY session_date DESC''')
+            rows = c.fetchall()
+            keys = ['session_id', 'job_role', 'difficulty', 'mode', 'overall_score', 'question_count', 'avg_time', 'session_date', 'session_feedback', 'details_json']
+            return [dict(zip(keys, row)) for row in rows]
     except Exception as e:
         st.warning(f"Failed to load session history: {str(e)}")
         return []
+
+def load_session_details(session_id):
+    try:
+        with sqlite3.connect('interview_memory.db') as conn:
+            c = conn.cursor()
+            c.execute('''SELECT session_id, user_id, job_role, difficulty, mode, overall_score, question_count, avg_time, session_date, session_feedback, details_json
+                         FROM sessions WHERE session_id = ?''', (session_id,))
+            session_row = c.fetchone()
+            if not session_row:
+                return None
+            session_cols = ['session_id', 'user_id', 'job_role', 'difficulty', 'mode', 'overall_score', 'question_count', 'avg_time', 'session_date', 'session_feedback', 'details_json']
+            session_data = dict(zip(session_cols, session_row))
+            c.execute('''SELECT question, answer, score, rubric_scores, feedback, strengths, improvements, ideal_answer, missing_keywords, rewritten_answer, time_taken
+                         FROM performance WHERE session_id = ? ORDER BY id ASC''', (session_id,))
+            rows = c.fetchall()
+            details = []
+            for row in rows:
+                q, a, score, rubric_scores, feedback, strengths, improvements, ideal_answer, missing_keywords, rewritten_answer, time_taken = row
+                details.append({
+                    'question': q,
+                    'answer': a,
+                    'score': score,
+                    'rubric_scores': json.loads(rubric_scores) if rubric_scores else {},
+                    'feedback': feedback,
+                    'strengths': json.loads(strengths) if strengths else [],
+                    'improvements': json.loads(improvements) if improvements else [],
+                    'ideal_answer': json.loads(ideal_answer) if ideal_answer else [],
+                    'missing_keywords': json.loads(missing_keywords) if missing_keywords else [],
+                    'rewritten_answer': rewritten_answer,
+                    'time_taken': time_taken,
+                })
+            session_data['questions'] = details
+            return session_data
+    except Exception as e:
+        st.warning(f"Failed to load session details: {str(e)}")
+        return None
+
+def delete_session(session_id):
+    try:
+        with sqlite3.connect('interview_memory.db') as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM performance WHERE session_id = ?', (session_id,))
+            c.execute('DELETE FROM sessions WHERE session_id = ?', (session_id,))
+            c.execute('DELETE FROM conversations WHERE session_id = ?', (session_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        st.warning(f"Failed to delete session: {str(e)}")
+        return False
 
 def get_conversation_context(session_id, limit=5):
     try:
@@ -202,6 +299,85 @@ def get_conversation_context(session_id, limit=5):
             return [{"q": h[0], "a": h[1]} for h in reversed(history)]
     except Exception:
         return []
+
+
+def generate_session_pdf_bytes(session_data):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import inch
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    margin = 0.6 * inch
+    y = height - margin
+
+    title = f"Interview Session Report: {session_data.get('job_role', 'Unknown Role')}"
+    c.setFont('Helvetica-Bold', 16)
+    c.drawString(margin, y, title)
+    y -= 24
+
+    c.setFont('Helvetica', 10)
+    c.drawString(margin, y, f"Session ID: {session_data.get('session_id', '')}")
+    y -= 14
+    date_text = session_data.get('session_date') or datetime.now().strftime('%Y-%m-%d %H:%M')
+    c.drawString(margin, y, f"Date: {date_text}")
+    y -= 14
+    c.drawString(margin, y, f"Role: {session_data.get('job_role', '')}   Difficulty: {session_data.get('difficulty', '')}  Mode: {session_data.get('mode', '')}")
+    y -= 18
+    c.drawString(margin, y, f"Overall Score: {session_data.get('overall_score', 0):.0f}%   Questions: {session_data.get('question_count', len(session_data.get('questions', [])))}   Avg Time: {session_data.get('avg_time', 0):.0f}s")
+    y -= 20
+    c.line(margin, y, width - margin, y)
+    y -= 18
+
+    # Add per-question details
+    c.setFont('Helvetica-Bold', 12)
+    c.drawString(margin, y, "Question-by-Question Review")
+    y -= 16
+    c.setFont('Helvetica', 10)
+    for idx, q in enumerate(session_data.get('questions', []), start=1):
+        if y < margin + 120:
+            c.showPage()
+            y = height - margin
+            c.setFont('Helvetica', 10)
+        c.setFont('Helvetica-Bold', 10)
+        c.drawString(margin, y, f"{idx}. {q.get('question', '')[:90]}")
+        y -= 12
+        c.setFont('Helvetica', 10)
+        c.drawString(margin + 12, y, f"Score: {q.get('score', 0)}/100")
+        y -= 12
+        c.drawString(margin + 12, y, f"Your Answer: {q.get('answer', '')[:120]}")
+        y -= 12
+        strengths = ', '.join(q.get('strengths', [])) or 'N/A'
+        improvements = ', '.join(q.get('improvements', [])) or 'N/A'
+        ideal = '; '.join(q.get('ideal_answer', [])) or 'N/A'
+        missing = ', '.join(q.get('missing_keywords', [])) or 'N/A'
+        c.drawString(margin + 12, y, f"Strengths: {strengths[:100]}")
+        y -= 12
+        c.drawString(margin + 12, y, f"What to Improve: {improvements[:100]}")
+        y -= 12
+        c.drawString(margin + 12, y, f"Ideal Points: {ideal[:100]}")
+        y -= 12
+        c.drawString(margin + 12, y, f"Missing Concepts: {missing[:100]}")
+        y -= 18
+
+    if session_data.get('session_feedback'):
+        if y < margin + 60:
+            c.showPage(); y = height - margin
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(margin, y, "Overall Improvement Summary")
+        y -= 14
+        c.setFont('Helvetica', 10)
+        for line in session_data['session_feedback'].split('\n'):
+            if y < margin + 12:
+                c.showPage(); y = height - margin
+            c.drawString(margin + 8, y, line[:120])
+            y -= 12
+
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
 
 # ═══════════════════════════════════════════════════════════
 # AI & EVALUATION
@@ -256,10 +432,21 @@ Return JSON:
         try:
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group())
+                parsed = json.loads(json_match.group())
+                parsed.setdefault('strengths', parsed.get('strengths', []))
+                parsed.setdefault('improvements', parsed.get('improvements', []))
+                parsed.setdefault('ideal_answer_outline', parsed.get('ideal_answer_outline', []))
+                parsed.setdefault('rewritten_answer', parsed.get('rewritten_answer', ""))
+                parsed.setdefault('feedback', parsed.get('feedback', ""))
+                missing = [k for k in keywords if k.lower() not in (answer or "").lower()]
+                parsed.setdefault('missing_keywords', missing)
+                parsed['total_score'] = int(parsed.get('total_score', 0))
+                return parsed
         except Exception:
             pass
-    return keyword_rubric_evaluate(answer, keywords)
+    result = keyword_rubric_evaluate(answer, keywords)
+    result['missing_keywords'] = [k for k in keywords if k.lower() not in (answer or "").lower()]
+    return result
 
 def keyword_rubric_evaluate(answer, keywords):
     """Fallback evaluation using keyword matching"""
@@ -275,6 +462,7 @@ def keyword_rubric_evaluate(answer, keywords):
         }
     matched = sum(1 for kw in keywords if kw.lower() in answer.lower())
     base_score = int((matched / len(keywords)) * 100)
+    missing = [k for k in keywords if k.lower() not in answer.lower()]
     return {
         "total_score": base_score,
         "rubric": {
@@ -285,9 +473,10 @@ def keyword_rubric_evaluate(answer, keywords):
             "real_world": int(base_score * 0.1)
         },
         "strengths": [f"Mentioned {matched}/{len(keywords)} key concepts"] if matched > 0 else [],
-        "improvements": [f"Consider: {', '.join([k for k in keywords if k.lower() not in answer.lower()][:3])}"],
+        "improvements": [f"Consider: {', '.join(missing[:3])}" if missing else "Add more examples and details"],
         "ideal_answer_outline": [f"Explain {kw}" for kw in keywords[:3]],
         "rewritten_answer": f"A strong answer would cover: {', '.join(keywords)}",
+        "missing_keywords": missing,
         "feedback": "👍 Good" if base_score >= 60 else "⚠️ Needs detail"
     }
 

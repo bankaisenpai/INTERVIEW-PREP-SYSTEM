@@ -928,6 +928,39 @@ def apply_custom_css():
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     
+    .strength-badge {
+        display: inline-block;
+        background: rgba(16, 185, 129, 0.15);
+        color: #047857;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        padding: 5px 12px;
+        margin: 2px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .improve-badge {
+        display: inline-block;
+        background: rgba(249, 115, 22, 0.15);
+        color: #b45309;
+        border: 1px solid rgba(249, 115, 22, 0.3);
+        padding: 5px 12px;
+        margin: 2px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .ideal-badge {
+        display: inline-block;
+        background: rgba(37, 99, 235, 0.15);
+        color: #1d4ed8;
+        border: 1px solid rgba(37, 99, 235, 0.3);
+        padding: 5px 12px;
+        margin: 2px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+    }
     .missing-badge {
         display: inline-block;
         background: rgba(239, 68, 68, 0.15);
@@ -994,7 +1027,8 @@ def render_home_page():
     from app import load_session_history
     
     user = get_current_user()
-    sessions = load_session_history()
+    user_id = user.get('id') if user else None
+    sessions = load_session_history(user_id=user_id)
     
     st.markdown("<h1 class='main-header'>🎤 AI-Powered Interview Preparation System</h1>", unsafe_allow_html=True)
     if user:
@@ -1005,8 +1039,11 @@ def render_home_page():
     col1, col2, col3 = st.columns(3, gap="large")
 
     total_sessions = len(sessions) if sessions else 0
-    latest_score = f"{sessions[0][3]:.0f}%" if sessions else "N/A"
-    improvement = f"{(sessions[0][3] - sessions[-1][3]):+.0f}%" if sessions and len(sessions) > 1 else "+0%"
+    latest_score = f"{sessions[0]['overall_score']:.0f}%" if sessions else "N/A"
+    if sessions and len(sessions) > 1:
+        improvement = f"{(sessions[0]['overall_score'] - sessions[-1]['overall_score']):+.0f}%"
+    else:
+        improvement = "+0%"
 
     with col1:
         st.markdown("""
@@ -1320,7 +1357,7 @@ def _render_intro_questions(active_role, active_difficulty, tech_count, mode_con
         speak_question(q['question'], f"intro_{st.session_state.session_id}_{st.session_state.question_num}")
 
         answer = st.text_area(
-            "",
+            "Intro answer",
             height=140,
             key=f"intro_{st.session_state.question_num}",
             placeholder="Type your answer...",
@@ -1371,7 +1408,7 @@ def _render_technical_questions(mode_config):
         speak_question(q['question'], f"tech_{st.session_state.session_id}_{st.session_state.question_num}")
 
         answer = st.text_area(
-            "",
+            "Technical answer",
             height=170,
             key=f"tech_{st.session_state.question_num}",
             placeholder="Type your answer...",
@@ -1385,11 +1422,42 @@ def _render_technical_questions(mode_config):
                     answer_time = (datetime.now() - st.session_state.question_start_time).seconds if st.session_state.question_start_time else 0
                     with st.spinner("Evaluating..."):
                         result = evaluate_with_rubric(q['question'], answer, q['keywords'], q.get('type'))
+                        strengths = result.get('strengths', [])
+                        improvements = result.get('improvements', [])
+                        ideal_answer = result.get('ideal_answer_outline', [])
+                        missing_keywords = result.get('missing_keywords', [])
+                        rewritten = result.get('rewritten_answer', '')
                         save_conversation(st.session_state.session_id, q['question'], answer, q['category'])
-                        save_performance(st.session_state.session_id, q['question'], answer, result['total_score'], result['rubric'], result['feedback'], answer_time)
-                        st.session_state.answers.append({"q": q['question'], "a": answer, "category": q['category'], "score": result['total_score'], "rubric": result['rubric'], "feedback": result['feedback'], "time_taken": answer_time})
-                        st.session_state.scores.append(result['total_score'])
-                        st.session_state.rubric_scores.append(result['rubric'])
+                        save_performance(
+                            st.session_state.session_id,
+                            q['question'],
+                            answer,
+                            result.get('total_score', 0),
+                            result.get('rubric', {}),
+                            result.get('feedback', ''),
+                            answer_time,
+                            strengths=strengths,
+                            improvements=improvements,
+                            ideal_answer=ideal_answer,
+                            missing_keywords=missing_keywords,
+                            rewritten_answer=rewritten
+                        )
+                        st.session_state.answers.append({
+                            "q": q['question'],
+                            "a": answer,
+                            "category": q['category'],
+                            "score": result.get('total_score', 0),
+                            "rubric": result.get('rubric', {}),
+                            "feedback": result.get('feedback', ''),
+                            "strengths": strengths,
+                            "improvements": improvements,
+                            "ideal_answer": ideal_answer,
+                            "missing_keywords": missing_keywords,
+                            "rewritten_answer": rewritten,
+                            "time_taken": answer_time
+                        })
+                        st.session_state.scores.append(result.get('total_score', 0))
+                        st.session_state.rubric_scores.append(result.get('rubric', {}))
                         if mode_config.get("immediate_feedback", False):
                             _render_feedback_display(result)
                         st.session_state.question_num += 1
@@ -1399,7 +1467,17 @@ def _render_technical_questions(mode_config):
                             st.session_state.interview_stage = 'complete'
                             avg = sum(st.session_state.scores) / len(st.session_state.scores) if st.session_state.scores else 0
                             config = get_active_interview_config()
-                            save_session(st.session_state.session_id, config['job_role'], config['difficulty'], config['mode'], avg)
+                            save_session(
+                                st.session_state.session_id,
+                                config['job_role'],
+                                config['difficulty'],
+                                config['mode'],
+                                avg,
+                                question_count=len(st.session_state.scores),
+                                avg_time=sum([a.get('time_taken',0) for a in st.session_state.answers]) / max(1,len(st.session_state.answers)),
+                                session_feedback=result.get('feedback', ''),
+                                details_json=json.dumps(st.session_state.answers)
+                            )
                         time.sleep(1)
                         st.rerun()
                 else:
@@ -1466,194 +1544,222 @@ def _render_completion_screen(active_mode):
 
 
 def render_results_page():
-    """Render results page with FIXED improvement plan generation"""
-    from app import get_active_interview_config
-    
+    """Render results page with detailed improvement fields and PDF download"""
+    from app import get_active_interview_config, generate_session_pdf_bytes
+
     st.title("📊 Performance Report")
-    
+
     if not st.session_state.answers:
         st.warning("⚠️ No interview completed. Please complete an interview first.")
-    else:
-        tech = [a for a in st.session_state.answers if not a.get('is_intro')]
-        avg = sum([a.get('score', 0) for a in tech]) / len(tech) if tech else 0
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f"<div class='score-card'><h2>{avg:.0f}%</h2><p>Overall Score</p></div>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"<div class='score-card'><h2>{len(tech)}</h2><p>Questions Answered</p></div>", unsafe_allow_html=True)
-        with col3:
-            avg_time = sum([a.get('time_taken', 0) for a in tech]) / len(tech) if tech else 0
-            st.markdown(f"<div class='score-card'><h2>{avg_time:.0f}s</h2><p>Avg Time</p></div>", unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        st.subheader("📝 Question-by-Question Breakdown")
-        for i, ans in enumerate(tech, 1):
-            score = ans.get('score', 0)
-            with st.expander(f"Q{i}: {ans['q'][:60]}... | Score: {score}/100", expanded=False):
-                st.markdown(f"**Question:** {ans['q']}")
-                st.markdown(f"**Your Answer:** {ans['a']}")
-                
-                if ans.get('ideal_answer'):
-                    st.markdown("**💡 Key Points:**")
-                    for p in ans['ideal_answer']:
-                        st.markdown(f"• {p}")
-                
-                if ans.get('strengths'):
-                    st.markdown("**✅ Strengths:**")
-                    for s in ans['strengths']:
-                        st.markdown(f"• {s}")
-                
-                if ans.get('improvements'):
-                    st.markdown("**⚠️ Areas for Improvement:**")
-                    for imp in ans['improvements']:
-                        st.markdown(f"• {imp}")
-        
-        st.markdown("---")
-        
-        config = get_active_interview_config()
-        active_role = config['job_role'] if config['job_role'] else "Unknown Role"
-        active_mode = config['mode'] if config['mode'] else "Practice Mode"
-        
-        if st.button("📈 Generate Personalized 7-Day Improvement Plan", type="primary"):
-            with st.spinner("🤖 Analyzing your performance and creating personalized plan..."):
-                plan = generate_improvement_plan_with_mode(
-                    st.session_state.session_id, 
-                    active_role,
-                    active_mode
-                )
-                
-                if plan:
-                    mode_emoji = "🎓" if active_mode == "Practice Mode" else "⭐"
-                    st.success(f"{mode_emoji} Personalized 7-Day Plan for {active_role} ({active_mode})")
-                    
-                    st.info(f"**Focus Area:** Based on your weakest rubric category, this plan targets your specific improvement needs.")
-                    
-                    for day_plan in plan:
-                        day_num = day_plan['day']
-                        
-                        if day_num in [1, 7]:
-                            border_color = "#667eea"
-                        elif day_num in [2, 4, 6]:
-                            border_color = "#10b981"
-                        else:
-                            border_color = "#3b82f6"
-                        
-                        with st.expander(
-                            f"{day_plan['focus']}", 
-                            expanded=(day_num == 1)
-                        ):
-                            st.markdown(f"#### 📅 Day {day_num}")
-                            st.markdown(f"**🎯 Focus:** {day_plan['focus']}")
-                            
-                            st.markdown("**📝 Tasks:**")
-                            for task in day_plan['tasks']:
-                                st.markdown(f"✓ {task}")
-                            
-                            st.markdown("**📚 Resources:**")
-                            for resource in day_plan['resources']:
-                                st.markdown(f"• {resource}")
-                            
-                            if day_num < 7:
-                                st.markdown(f"""
-                                <div style='
-                                    border-bottom: 2px solid {border_color};
-                                    margin-top: 16px;
-                                    opacity: 0.3;
-                                '></div>
-                                """, unsafe_allow_html=True)
-                else:
-                    st.error("❌ Could not generate improvement plan. Please try again or complete more interview questions.")
+        return
+
+    tech = [a for a in st.session_state.answers if not a.get('is_intro')]
+    avg = sum([a.get('score', 0) for a in tech]) / len(tech) if tech else 0
+    avg_time = sum([a.get('time_taken', 0) for a in tech]) / len(tech) if tech else 0
+    total_questions = len(tech)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"<div class='score-card'><h2>{avg:.0f}%</h2><p>Overall Score</p></div>", unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"<div class='score-card'><h2>{total_questions}</h2><p>Questions Answered</p></div>", unsafe_allow_html=True)
+    with col3:
+        st.markdown(f"<div class='score-card'><h2>{avg_time:.0f}s</h2><p>Avg Time</p></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("📝 Question-by-Question Breakdown")
+
+    for i, ans in enumerate(tech, 1):
+        score = ans.get('score', 0)
+        with st.expander(f"Q{i}: {ans.get('q', '')[:65]}... | Score: {score}/100", expanded=False):
+            st.markdown(f"**Question:** {ans.get('q', '')}")
+            st.markdown(f"**Your Answer:** {ans.get('a', '')}")
+            st.markdown(f"**Score:** {score}/100")
+
+            strengths = ans.get('strengths', [])
+            improvements = ans.get('improvements', [])
+            ideal_answer = ans.get('ideal_answer', [])
+            missing = ans.get('missing_keywords', [])
+
+            if strengths:
+                st.markdown("**✅ Strengths**")
+                for s in strengths:
+                    st.markdown(f"<span class='strength-badge'>{s}</span>", unsafe_allow_html=True)
+
+            st.markdown("**⚠️ What to Improve**")
+            if improvements:
+                for imp in improvements:
+                    st.markdown(f"<span class='improve-badge'>{imp}</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='improve-badge'>Focus on structuring your answer with examples and depth.</span>", unsafe_allow_html=True)
+
+            if ideal_answer:
+                st.markdown("**💡 Better Sample Answer / Ideal Points**")
+                for p in ideal_answer:
+                    st.markdown(f"<span class='ideal-badge'>{p}</span>", unsafe_allow_html=True)
+
+            if missing:
+                st.markdown("**🔑 Key Missing Keywords / Concepts**")
+                for m in missing:
+                    st.markdown(f"<span class='missing-badge'>{m}</span>", unsafe_allow_html=True)
+
+            if ans.get('rewritten_answer'):
+                st.markdown("**📝 Professional Version Preview**")
+                st.markdown(f"<div class='rewritten-answer'>{ans.get('rewritten_answer')}</div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("📌 Session Summary")
+    st.write(f"**Role:** {st.session_state.active_job_role}")
+    st.write(f"**Difficulty:** {st.session_state.active_difficulty}")
+    st.write(f"**Mode:** {st.session_state.active_interview_mode}")
+
+    if st.button("📄 Download Session PDF"):
+        session_export = {
+            'session_id': st.session_state.session_id,
+            'job_role': st.session_state.active_job_role,
+            'difficulty': st.session_state.active_difficulty,
+            'mode': st.session_state.active_interview_mode,
+            'overall_score': avg,
+            'question_count': total_questions,
+            'avg_time': avg_time,
+            'session_date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'session_feedback': 'Keep practicing structured responses and include concrete examples.',
+            'questions': tech
+        }
+        pdf_bytes = generate_session_pdf_bytes(session_export)
+        filename = f"{st.session_state.active_job_role.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        st.download_button("Download Interview PDF", data=pdf_bytes, file_name=filename, mime="application/pdf")
+
+    config = get_active_interview_config()
+    active_role = config['job_role'] if config['job_role'] else 'Unknown Role'
+    active_mode = config['mode'] if config['mode'] else 'Practice Mode'
+
+    if st.button("📈 Generate Personalized 7-Day Improvement Plan", type="primary"):
+        with st.spinner("🤖 Analyzing your performance and creating personalized plan..."):
+            plan = generate_improvement_plan_with_mode(
+                st.session_state.session_id,
+                active_role,
+                active_mode
+            )
+            if plan:
+                mode_emoji = "🎓" if active_mode == "Practice Mode" else "⭐"
+                st.success(f"{mode_emoji} Personalized 7-Day Plan for {active_role} ({active_mode})")
+                st.info("**Focus Area:** Based on your weakest rubric category, this plan targets your specific improvement needs.")
+                for day_plan in plan:
+                    with st.expander(f"Day {day_plan['day']}: {day_plan['focus']}", expanded=(day_plan['day'] == 1)):
+                        st.markdown("**Tasks:**")
+                        for task in day_plan['tasks']:
+                            st.write(f"- {task}")
+                        st.markdown("**Resources:**")
+                        for resource in day_plan['resources']:
+                            st.write(f"- {resource}")
+            else:
+                st.error("❌ Could not generate improvement plan. Please try again.")
 
 
 def render_progress_page():
-    """Render progress dashboard"""
-    from app import load_session_history
-    
+    """Render progress dashboard with session history and details"""
+    from app import load_session_history, load_session_details, delete_session, generate_session_pdf_bytes
+
     st.title("📈 Performance Dashboard")
-    
-    sessions = load_session_history()
-    
+
+    user = get_current_user()
+    user_id = user.get('id') if user else None
+    sessions = load_session_history(user_id=user_id)
+
     if not sessions:
         st.info("💡 Complete interviews to track your progress!")
+        return
+
+    df = pd.DataFrame(sessions)
+    if 'session_date' in df.columns:
+        df['session_date'] = pd.to_datetime(df['session_date'])
     else:
-        df = pd.DataFrame(sessions, columns=['ID', 'Role', 'Difficulty', 'Score', 'Date'])
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.sort_values('Date')
-        
-        st.subheader("📊 Key Performance Indicators")
-        
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
-            st.metric("Total Sessions", len(sessions))
-        
-        with col2:
-            last_score = df['Score'].iloc[-1]
-            st.metric("Latest Score", f"{last_score:.0f}%")
-        
-        with col3:
-            avg_score = df['Score'].mean()
-            st.metric("Average Score", f"{avg_score:.0f}%")
-        
-        with col4:
-            best_score = df['Score'].max()
-            st.metric("Best Score", f"{best_score:.0f}%")
-        
-        with col5:
-            if len(df) > 1:
-                improvement = df['Score'].iloc[-1] - df['Score'].iloc[0]
-                st.metric("Improvement", f"{improvement:+.0f}%", delta=f"{improvement:+.0f}%")
-            else:
-                st.metric("Improvement", "N/A")
-        
-        st.markdown("---")
-        
-        st.subheader("📈 Score Trend Over Time")
-        chart_df = df[['Date', 'Score']].copy()
-        chart_df = chart_df.set_index('Date')
-        st.line_chart(chart_df, height=300)
-        
-        st.markdown("---")
-        
-        st.subheader("📊 Performance by Category")
-        
-        try:
-            with sqlite3.connect('interview_memory.db') as conn:
-                c = conn.cursor()
-                c.execute('''SELECT rubric_scores FROM performance''')
-                all_rubrics = c.fetchall()
-        except Exception:
-            all_rubrics = []
-        
-        if all_rubrics:
-            category_totals = {"Correctness": 0, "Depth": 0, "Clarity": 0, "Structure": 0, "Real-world": 0}
-            count = 0
-            
-            for rubric_json, in all_rubrics:
-                try:
-                    rubric = json.loads(rubric_json)
-                    category_totals["Correctness"] += rubric.get("correctness", 0)
-                    category_totals["Depth"] += rubric.get("depth", 0)
-                    category_totals["Clarity"] += rubric.get("clarity", 0)
-                    category_totals["Structure"] += rubric.get("structure", 0)
-                    category_totals["Real-world"] += rubric.get("real_world", 0)
-                    count += 1
-                except Exception:
-                    pass
-            
-            if count > 0:
-                category_avgs = {k: v / count for k, v in category_totals.items()}
-                category_df = pd.DataFrame(list(category_avgs.items()), columns=['Category', 'Score'])
-                st.bar_chart(category_df.set_index('Category'), height=300)
-        
-        st.markdown("---")
-        
-        st.subheader("📋 Session History")
-        
-        display_df = df[['Date', 'Role', 'Difficulty', 'Score']].copy()
-        display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
-        display_df['Score'] = display_df['Score'].apply(lambda x: f"{x:.0f}%")
-        
-        st.dataframe(display_df, hide_index=True)
+        df['session_date'] = pd.to_datetime(df.get('completed_at', pd.Series(dtype='datetime64[ns]')))
+    df = df.sort_values('session_date', ascending=False)
+
+    st.subheader("📊 Key Performance Indicators")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Total Sessions", len(df))
+    with col2:
+        st.metric("Latest Score", f"{df['overall_score'].iloc[0]:.0f}%")
+    with col3:
+        st.metric("Average Score", f"{df['overall_score'].mean():.0f}%")
+    with col4:
+        st.metric("Best Score", f"{df['overall_score'].max():.0f}%")
+    with col5:
+        if len(df) > 1:
+            improvement = df['overall_score'].iloc[0] - df['overall_score'].iloc[-1]
+            st.metric("Improvement", f"{improvement:+.0f}%", delta=f"{improvement:+.0f}%")
+        else:
+            st.metric("Improvement", "N/A")
+
+    st.markdown("---")
+    st.subheader("🔎 Filter Session History")
+    roles = sorted(df['job_role'].dropna().unique().tolist())
+    role_filter = st.multiselect("Role", options=roles, default=roles)
+    min_score, max_score = st.slider("Score range", 0, 100, (0, 100))
+    search_text = st.text_input("Search by role, keyword, or date")
+
+    filtered = df.copy()
+    if role_filter:
+        filtered = filtered[filtered['job_role'].isin(role_filter)]
+    filtered = filtered[(filtered['overall_score'] >= min_score) & (filtered['overall_score'] <= max_score)]
+    if search_text:
+        filtered = filtered[filtered.apply(lambda row: search_text.lower() in str(row['job_role']).lower() or search_text.lower() in str(row.get('difficulty', '')).lower() or search_text.lower() in str(row.get('session_date', '')).lower(), axis=1)]
+
+    if filtered.empty:
+        st.info("No sessions matched the selected filters.")
+        return
+
+    st.markdown("---")
+    st.subheader("📋 Session History")
+    history_display = filtered[['session_id', 'job_role', 'difficulty', 'overall_score', 'question_count', 'avg_time', 'session_date']].copy()
+    history_display['session_date'] = history_display['session_date'].dt.strftime('%Y-%m-%d %H:%M')
+    history_display['overall_score'] = history_display['overall_score'].round(0).astype(int).astype(str) + "%"
+    st.dataframe(history_display.rename(columns={
+        'session_id': 'Session ID', 'job_role': 'Role', 'difficulty': 'Difficulty',
+        'overall_score': 'Score', 'question_count': 'Questions', 'avg_time': 'Avg Time (s)',
+        'session_date': 'Date'
+    }), hide_index=True)
+
+    selected_session = st.selectbox("Select a session to view details", options=filtered['session_id'].tolist())
+    if selected_session:
+        session_data = load_session_details(selected_session)
+        if session_data:
+            st.markdown("---")
+            st.subheader("📑 Session Details")
+            st.write(f"**Role:** {session_data.get('job_role', '')}")
+            st.write(f"**Difficulty:** {session_data.get('difficulty', '')}")
+            st.write(f"**Mode:** {session_data.get('mode', '')}")
+            st.write(f"**Score:** {session_data.get('overall_score', 0):.0f}%")
+            st.write(f"**Questions:** {len(session_data.get('questions', []))}")
+            st.write(f"**Avg Time:** {session_data.get('avg_time', 0):.0f}s")
+            st.write(f"**Session Date:** {session_data.get('session_date', '')}")
+
+            bs1, bs2, bs3 = st.columns([1, 1, 1])
+            with bs1:
+                if st.button("View Session"):
+                    st.info("Already showing session details below.")
+            with bs2:
+                pdf_bytes = generate_session_pdf_bytes(session_data)
+                st.download_button("Download PDF", data=pdf_bytes, file_name=f"{session_data.get('job_role','session')}_{session_data.get('session_date','').replace(':','-').replace(' ','_')}.pdf", mime="application/pdf")
+            with bs3:
+                if st.button("Delete Session", key=f"delete_{selected_session}"):
+                    if delete_session(selected_session):
+                        st.success("Session deleted.")
+                        st.experimental_rerun()
+
+            st.markdown("---")
+            for i, q in enumerate(session_data.get('questions', []), start=1):
+                with st.expander(f"Q{i}: {q.get('question', '')[:70]} | Score: {q.get('score', 0)}/100", expanded=False):
+                    st.markdown(f"**Question:** {q.get('question', '')}")
+                    st.markdown(f"**Your Answer:** {q.get('answer', '')}")
+                    st.markdown(f"**Strengths:** {', '.join(q.get('strengths', [])) or 'N/A'}")
+                    st.markdown(f"**What to Improve:** {', '.join(q.get('improvements', [])) or 'N/A'}")
+                    st.markdown(f"**Ideal Answer Points:** {', '.join(q.get('ideal_answer', [])) or 'N/A'}")
+                    st.markdown(f"**Missing Keywords:** {', '.join(q.get('missing_keywords', [])) or 'N/A'}")
+
+    else:
+        st.info("No session history available.")
